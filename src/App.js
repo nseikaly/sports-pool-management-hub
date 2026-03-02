@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ref, onValue, set, update } from "firebase/database";
-import { db } from "./firebase";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "./firebase";
 import { BRACKET_CONFIG, GAME_OPTIONS, MAX_POINTS } from "./bracketConfig";
 import { buildLeaderboard, calcPoints, maxPossible, getEliminatedTeams } from "./scoring";
 import { TeamLogo } from "./teamLogos";
@@ -1360,8 +1361,10 @@ export default function App() {
   const [loading,     setLoading]     = useState(true);
   const [saving,      setSaving]      = useState(false);
   const [submitError, setSubmitError] = useState("");   // inline persistent error under submit row
-  const [adminAuthed,  setAdminAuthed]  = useState(false);
-  const [adminPass,    setAdminPass]    = useState("");
+  const [adminAuthed,      setAdminAuthed]      = useState(false);
+  const [adminEmail,       setAdminEmail]       = useState("");
+  const [adminPass,        setAdminPass]        = useState("");
+  const [adminLoginError,  setAdminLoginError]  = useState("");
   const [picksLocked,  setPicksLocked]  = useState(false);
   const [viewingEntry, setViewingEntry] = useState(null);  // participant whose picks are open in overlay
   const [scenarioPicks,  setScenarioPicks]  = useState({});  // local session-only scenario picks
@@ -1416,6 +1419,11 @@ export default function App() {
       }
     });
 
+    // Track Firebase Auth state — keeps admin logged in across page refreshes
+    const unsubAuth = auth
+      ? onAuthStateChanged(auth, user => setAdminAuthed(!!user))
+      : () => {};
+
     // Load my own saved picks (entry 1 and entry 2)
     const savedName = localStorage.getItem("pool_name");
     if (savedName) {
@@ -1425,10 +1433,10 @@ export default function App() {
       const unsubMe2 = onValue(ref(db, `participants/${sanitize(savedName)}/picks2`), snap => {
         if (snap.exists()) setMyPicks2(snap.val());
       });
-      return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubMe(); unsubMe2(); };
+      return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubAuth(); unsubMe(); unsubMe2(); };
     }
 
-    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); };
+    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubAuth(); };
   }, []);
 
   const showToast = (msg) => {
@@ -1539,15 +1547,28 @@ export default function App() {
     setSaving(false);
   };
 
-  // ── Admin: password gate ──
-  const handleAdminLogin = () => {
-    if (adminPass === "NBA") {
-      setAdminAuthed(true);
+  // ── Admin: Firebase Auth login / logout ──
+  const handleAdminLogin = async () => {
+    setAdminLoginError("");
+    if (!adminEmail.trim() || !adminPass.trim()) {
+      setAdminLoginError("Please enter your email and password");
+      return;
+    }
+    if (!auth) { setAdminLoginError("Firebase not configured"); return; }
+    try {
+      await signInWithEmailAndPassword(auth, adminEmail.trim(), adminPass.trim());
+      setAdminEmail("");
       setAdminPass("");
-    } else {
-      showToast("Incorrect password");
+    } catch (e) {
+      setAdminLoginError("Incorrect email or password");
       setAdminPass("");
     }
+  };
+
+  const handleAdminLogout = async () => {
+    try {
+      if (auth) await signOut(auth);
+    } catch (e) { console.error(e); }
   };
 
   // ── Admin: picks lock toggle ──
@@ -2180,21 +2201,38 @@ export default function App() {
           <div className="admin-gate">
             <div className="admin-gate-icon">🔒</div>
             <div className="admin-gate-title">Admin Access</div>
-            <div className="admin-gate-sub">Enter password to continue</div>
+            <div className="admin-gate-sub">Sign in with your admin account</div>
+            <input
+              className="fi" type="email" placeholder="Email" style={{marginBottom:8}}
+              value={adminEmail} onChange={e => { setAdminEmail(e.target.value); setAdminLoginError(""); }}
+              onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
+              autoFocus
+            />
             <div className="admin-gate-row">
               <input
                 className="fi" type="password" placeholder="Password"
-                value={adminPass} onChange={e => setAdminPass(e.target.value)}
+                value={adminPass} onChange={e => { setAdminPass(e.target.value); setAdminLoginError(""); }}
                 onKeyDown={e => e.key === "Enter" && handleAdminLogin()}
-                autoFocus
               />
-              <button className="btn btn-gold" onClick={handleAdminLogin}>Enter</button>
+              <button className="btn btn-gold" onClick={handleAdminLogin}>Sign In</button>
             </div>
+            <div className="admin-gate-err">{adminLoginError}</div>
           </div>
         )}
 
         {tab === "admin" && adminAuthed && (
           <div>
+            {/* Admin header row — signed-in indicator + sign out */}
+            <div style={{display:'flex', justifyContent:'flex-end', alignItems:'center',
+              gap:10, marginBottom:14}}>
+              <span style={{fontSize:'0.72rem', color:'var(--text3)', letterSpacing:'0.5px'}}>
+                {auth?.currentUser?.email && `Signed in as ${auth.currentUser.email}`}
+              </span>
+              <button className="btn" style={{fontSize:'0.72rem', padding:'5px 14px'}}
+                onClick={handleAdminLogout}>
+                Sign Out
+              </button>
+            </div>
             {/* Lock toggle */}
             <div className={`lock-card ${picksLocked ? "locked" : "unlocked"}`}>
               <div className="lock-info">
