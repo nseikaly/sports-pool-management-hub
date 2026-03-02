@@ -1560,7 +1560,16 @@ export default function App() {
       setAdminEmail("");
       setAdminPass("");
     } catch (e) {
-      setAdminLoginError("Incorrect email or password");
+      console.error("Admin login error:", e.code, e.message);
+      if (e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" || e.code === "auth/user-not-found") {
+        setAdminLoginError("Incorrect email or password");
+      } else if (e.code === "auth/unauthorized-domain") {
+        setAdminLoginError("This domain is not authorized — add it in Firebase Console → Authentication → Settings → Authorized Domains");
+      } else if (e.code === "auth/configuration-not-found" || e.code === "auth/invalid-api-key") {
+        setAdminLoginError("Firebase Auth not configured — check your environment variables");
+      } else {
+        setAdminLoginError(`Login failed: ${e.code || e.message}`);
+      }
       setAdminPass("");
     }
   };
