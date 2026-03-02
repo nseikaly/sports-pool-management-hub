@@ -1330,6 +1330,19 @@ function InfoModal({ tab, onClose }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
+// Formats an ISO datetime string (e.g. "2026-04-18T20:00") for human display.
+function formatDeadline(isoStr) {
+  if (!isoStr) return "";
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    return d.toLocaleString("en-US", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true,
+    });
+  } catch { return isoStr; }
+}
+
 export default function App() {
   const [tab,       setTab]       = useState("picks");
   const [results,   setResults]   = useState(null);       // from Firebase
@@ -1352,6 +1365,9 @@ export default function App() {
   const [picksLocked,  setPicksLocked]  = useState(false);
   const [viewingEntry, setViewingEntry] = useState(null);  // participant whose picks are open in overlay
   const [scenarioPicks,  setScenarioPicks]  = useState({});  // local session-only scenario picks
+  const [deadline,         setDeadline]         = useState("");  // ISO string from Firebase settings/deadline
+  const [adminDeadlineDate, setAdminDeadlineDate] = useState(""); // date input for admin editor
+  const [adminDeadlineTime, setAdminDeadlineTime] = useState(""); // time input for admin editor
   const [scenarioEntry,  setScenarioEntry]  = useState(1);   // 1 or 2 — which entry to compare in Scenario
   const [infoOpen,      setInfoOpen]      = useState(false); // info/how-to-play panel
   const toastTimer = useRef(null);
@@ -1389,6 +1405,17 @@ export default function App() {
       setPicksLocked(snap.exists() ? snap.val() : false);
     });
 
+    // Listen to submission deadline (set by admin)
+    const unsubDeadline = onValue(ref(db, "settings/deadline"), snap => {
+      const val = snap.exists() ? snap.val() : "";
+      setDeadline(val);
+      if (val) {
+        const [d, t] = val.split("T");
+        setAdminDeadlineDate(d || "");
+        setAdminDeadlineTime(t?.slice(0, 5) || "");
+      }
+    });
+
     // Load my own saved picks (entry 1 and entry 2)
     const savedName = localStorage.getItem("pool_name");
     if (savedName) {
@@ -1398,10 +1425,10 @@ export default function App() {
       const unsubMe2 = onValue(ref(db, `participants/${sanitize(savedName)}/picks2`), snap => {
         if (snap.exists()) setMyPicks2(snap.val());
       });
-      return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubMe(); unsubMe2(); };
+      return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubMe(); unsubMe2(); };
     }
 
-    return () => { unsubResults(); unsubParticipants(); unsubLock(); };
+    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); };
   }, []);
 
   const showToast = (msg) => {
@@ -1429,6 +1456,14 @@ export default function App() {
   const totalSeries  = BRACKET_CONFIG.rounds.flatMap(r => r.series).length;
   const pickedCount  = Object.values(activePicks).filter(p => p.winner && p.games).length;
   const allPicked    = pickedCount === totalSeries;
+
+  // Scenario tab: count series that have a decision — either admin-settled or user scenario-picked
+  const scenarioPickedCount = BRACKET_CONFIG.rounds.flatMap(r => r.series).filter(s => {
+    const rs = getAdminResultForSeries(results, s.id);
+    if (rs?.winner) return true;  // admin result counts
+    return !!(scenarioPicks[s.id]?.winner && scenarioPicks[s.id]?.games);
+  }).length;
+  const scenarioAllPicked = scenarioPickedCount === totalSeries;
 
   // ── Submit ──
   const handleSubmit = async () => {
@@ -1522,6 +1557,21 @@ export default function App() {
       showToast(picksLocked ? "✓ Picks unlocked" : "🔒 Picks locked");
     } catch (e) {
       showToast("Error updating lock state");
+      console.error(e);
+    }
+  };
+
+  // ── Admin: deadline save ──
+  const handleSaveDeadline = async () => {
+    if (!adminDeadlineDate) return showToast("Please select a deadline date");
+    const isoStr = adminDeadlineTime
+      ? `${adminDeadlineDate}T${adminDeadlineTime}`
+      : adminDeadlineDate;
+    try {
+      await set(ref(db, "settings/deadline"), isoStr);
+      showToast("📅 Deadline saved!");
+    } catch (e) {
+      showToast("Error saving deadline");
       console.error(e);
     }
   };
@@ -1691,6 +1741,22 @@ export default function App() {
         {/* ══ PICKS ══════════════════════════════════════════════════════════ */}
         {tab === "picks" && (
           <div>
+            {/* Deadline banner — shown when admin has set a deadline */}
+            {deadline && (
+              <div style={{
+                display:'flex', alignItems:'center', gap:10, flexWrap:'wrap',
+                background:'rgba(201,168,76,0.08)', border:'1px solid rgba(201,168,76,0.28)',
+                borderRadius:6, padding:'8px 14px', marginBottom:10,
+              }}>
+                <span style={{
+                  fontFamily:"'Bebas Neue',sans-serif", fontSize:'0.82rem',
+                  letterSpacing:'2px', color:'var(--gold)', whiteSpace:'nowrap',
+                }}>📅 DEADLINE</span>
+                <span style={{color:'white', fontSize:'0.78rem', fontWeight:500}}>
+                  {formatDeadline(deadline)}
+                </span>
+              </div>
+            )}
             <div className="legend">
               <div style={{display:'flex', gap:20, flexWrap:'wrap', width:'100%'}}>
                 <span>R1: Winner <strong>10pts</strong> + Games <strong>5pts</strong></span>
@@ -1904,9 +1970,20 @@ export default function App() {
                     </div>
                     <div className="xs muted mt8">Pick hypothetical outcomes for remaining series · see how standings would shift</div>
                   </div>
-                  <div className="row gap8" style={{flexWrap:'wrap'}}>
-                    <button className="btn btn-gold" style={{fontSize:"0.72rem"}} onClick={handleScenarioAutoFill}>↺ Auto-fill My Picks</button>
-                    <button className="btn btn-danger" style={{fontSize:"0.72rem"}} onClick={handleScenarioClear}>✕ Clear Scenario</button>
+                  <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8}}>
+                    <div className="row gap8" style={{flexWrap:'wrap'}}>
+                      <button className="btn btn-gold" style={{fontSize:"0.72rem"}} onClick={handleScenarioAutoFill}>↺ Auto-fill My Picks</button>
+                      <button className="btn btn-danger" style={{fontSize:"0.72rem"}} onClick={handleScenarioClear}>✕ Clear Scenario</button>
+                    </div>
+                    {/* Scenario picks counter */}
+                    <span style={{
+                      fontWeight:700, fontSize:'0.78rem',
+                      color: scenarioAllPicked ? 'var(--green)' : 'var(--red)',
+                    }}>
+                      {scenarioAllPicked
+                        ? `✓ ${scenarioPickedCount}/${totalSeries} series picked`
+                        : `${scenarioPickedCount}/${totalSeries} series picked — ${totalSeries - scenarioPickedCount} to go`}
+                    </span>
                   </div>
                 </div>
 
@@ -2084,8 +2161,8 @@ export default function App() {
               })
             ) : (
               <div className="empty">
-                <h3>Stats Available After Lock</h3>
-                <p className="sm">Pool Stats populate once the admin locks picks</p>
+                <h3>POOL STATS AVAILABLE AFTER DEADLINE</h3>
+                <p className="sm">Pool Stats populate once the deadline has passed and the admin has locked picks.</p>
               </div>
             )}
 
@@ -2136,6 +2213,37 @@ export default function App() {
                   <span className="toggle-thumb" />
                 </label>
               </div>
+            </div>
+
+            {/* ── Deadline editor ── */}
+            <div style={{
+              background:'var(--surface)', border:'1px solid var(--border)',
+              borderRadius:8, padding:'14px 18px', marginBottom:16,
+            }}>
+              <div className="sec" style={{marginBottom:14}}>Submission Deadline</div>
+              <div style={{display:'flex', gap:10, flexWrap:'wrap', alignItems:'flex-end'}}>
+                <div>
+                  <label className="fl" style={{marginBottom:4}}>Date</label>
+                  <input type="date" className="fi" style={{maxWidth:170}}
+                    value={adminDeadlineDate}
+                    onChange={e => setAdminDeadlineDate(e.target.value)} />
+                </div>
+                <div>
+                  <label className="fl" style={{marginBottom:4}}>Time</label>
+                  <input type="time" className="fi" style={{maxWidth:130}}
+                    value={adminDeadlineTime}
+                    onChange={e => setAdminDeadlineTime(e.target.value)} />
+                </div>
+                <button className="btn btn-gold" style={{fontSize:'0.76rem', alignSelf:'flex-end'}}
+                  onClick={handleSaveDeadline}>
+                  Save Deadline
+                </button>
+              </div>
+              {deadline && (
+                <div className="xs muted" style={{marginTop:10}}>
+                  Current deadline: <strong style={{color:'var(--gold)'}}>{formatDeadline(deadline)}</strong>
+                </div>
+              )}
             </div>
 
             <div className="alert alert-warn mb16">
