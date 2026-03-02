@@ -33,7 +33,7 @@ const css = `
   .hdr-sub { font-size:0.68rem; letter-spacing:3px; color:var(--text2); text-transform:uppercase; margin-top:4px; }
   .live-dot { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; margin-right:6px; animation:pulse 2s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  .ball-icon { display:inline-block; width:2.3rem; height:2.3rem; margin-right:8px; vertical-align:middle; object-fit:contain; }
+
 
   /* Gold tint on native date/time picker icons */
   input[type="date"]::-webkit-calendar-picker-indicator,
@@ -1804,7 +1804,33 @@ export default function App() {
         {/* ── Header ── */}
         <div className="hdr">
           <div>
-            <div className="hdr-title"><img src="/basketball.svg" alt="" className="ball-icon" />{BRACKET_CONFIG.sport} <span>Playoff</span> Pool</div>
+            <div className="hdr-title" style={{display:'flex',alignItems:'center'}}>
+              <svg viewBox="0 0 200 200" style={{width:'2.2rem',height:'2.2rem',marginRight:'9px',flexShrink:0}} aria-hidden="true">
+                <defs>
+                  <radialGradient id="bb-fill" cx="36%" cy="28%" r="75%">
+                    <stop offset="0%"   stopColor="#FFB84D"/>
+                    <stop offset="28%"  stopColor="#F07A16"/>
+                    <stop offset="68%"  stopColor="#C05010"/>
+                    <stop offset="100%" stopColor="#6E2400"/>
+                  </radialGradient>
+                  <radialGradient id="bb-edge" cx="50%" cy="50%" r="50%">
+                    <stop offset="60%"  stopColor="rgba(0,0,0,0)"/>
+                    <stop offset="100%" stopColor="rgba(0,0,0,0.62)"/>
+                  </radialGradient>
+                  <clipPath id="bb-clip"><circle cx="100" cy="100" r="93"/></clipPath>
+                </defs>
+                <circle cx="100" cy="100" r="93" fill="url(#bb-fill)"/>
+                <g clipPath="url(#bb-clip)" fill="none" stroke="#180500" strokeLinecap="round" strokeLinejoin="round">
+                  <path strokeWidth="5.5" d="M7,100 C35,70 65,70 100,100 C135,130 165,130 193,100"/>
+                  <path strokeWidth="5.5" d="M100,7 C130,35 130,65 100,100 C70,135 70,165 100,193"/>
+                  <path strokeWidth="4.5" d="M38,10 C62,46 68,76 66,104 C64,132 55,164 42,190"/>
+                  <path strokeWidth="4.5" d="M162,10 C138,46 132,76 134,104 C136,132 145,164 158,190"/>
+                </g>
+                <circle cx="100" cy="100" r="93" fill="url(#bb-edge)"/>
+                <ellipse cx="63" cy="47" rx="26" ry="16" fill="rgba(255,255,255,0.23)" transform="rotate(-28,63,47)"/>
+              </svg>
+              <span>{BRACKET_CONFIG.sport} <span>Playoff</span> Pool</span>
+            </div>
             <div className="hdr-sub">2026 NBA Playoffs · Built & Run by <span style={{color:'var(--gold)', fontWeight:600}}>Nicholas Seikaly</span></div>
           </div>
           <div className="row gap8">
