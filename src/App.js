@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import { ref, onValue, set, update } from "firebase/database";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { db, auth } from "./firebase";
-import { BRACKET_CONFIG, GAME_OPTIONS, MAX_POINTS } from "./bracketConfig";
+import { BRACKET_CONFIG, GAME_OPTIONS, MAX_POINTS, PLAY_IN_CONFIG, PLAY_IN_SLOTS } from "./bracketConfig";
 import { buildLeaderboard, calcPoints, maxPossible, getEliminatedTeams } from "./scoring";
 import { TeamLogo } from "./teamLogos";
 
@@ -12,6 +12,58 @@ BRACKET_CONFIG.rounds[0].series.forEach(s => {
   if (s.topSeed    != null) TEAM_SEEDS[s.top]    = s.topSeed;
   if (s.bottomSeed != null) TEAM_SEEDS[s.bottom] = s.bottomSeed;
 });
+// Also register Play-In teams (seeds 9/10) so they render as real teams
+// in the bracket when a participant's play-in picks place them in an R1 slot.
+Object.values(PLAY_IN_CONFIG).forEach(conf => {
+  TEAM_SEEDS[conf.seed9]  = 9;
+  TEAM_SEEDS[conf.seed10] = 10;
+});
+
+// ─── Play-In helpers ──────────────────────────────────────────────────────────
+
+// Given a participant's play-in picks + admin results, returns the effective
+// #7/#8 seeds for East and West.  Admin results override participant picks.
+// Returns null for any seed not yet determined.
+function resolveEffectiveSeeds(participantPicks, adminResults) {
+  const eff = {};
+  ["piE1","piE2","piE3","piW1","piW2","piW3"].forEach(k => {
+    eff[k] = adminResults?.[k] || participantPicks?.[k] || null;
+  });
+  return {
+    E7: eff.piE1 || null,
+    E8: eff.piE3 || null,
+    W7: eff.piW1 || null,
+    W8: eff.piW3 || null,
+  };
+}
+
+// Applies play-in seed overrides to an R1 series.
+// Returns the series unchanged if it's not one of the four play-in slots.
+// "Play-In TBD" is inserted for any slot not yet determined.
+const PI_SLOT_MAP = { s1:"E8", s2:"E7", s5:"W8", s6:"W7" };
+function applyPlayInPatch(series, playInSeeds) {
+  if (!playInSeeds) return series;
+  const seedKey = PI_SLOT_MAP[series.id];
+  if (!seedKey) return series;
+  const team = playInSeeds[seedKey];
+  return { ...series, bottom: team || "Play-In TBD" };
+}
+
+// Returns the two teams that will face off in Play-In Game 3 for a conference,
+// derived from the winners/losers of Games 1 and 2.
+function getGame3Teams(conf, picks, adminResults) {
+  const cfg = PLAY_IN_CONFIG[conf];
+  const prefix = conf === "East" ? "piE" : "piW";
+  const g1Winner = adminResults?.[`${prefix}1`] || picks?.[`${prefix}1`] || null;
+  const g2Winner = adminResults?.[`${prefix}2`] || picks?.[`${prefix}2`] || null;
+  const g1Loser = g1Winner === cfg.seed7 ? cfg.seed8
+                : g1Winner === cfg.seed8 ? cfg.seed7 : null;
+  return {
+    top:    g1Loser   || null,
+    bottom: g2Winner  || null,
+    ready:  !!(g1Loser && g2Winner),
+  };
+}
 
 // ─── CSS ─────────────────────────────────────────────────────────────────────
 
@@ -77,6 +129,63 @@ const css = `
   .sbt-fill-East { height:100%; background:rgba(80,125,215,0.55); border-radius:2px; transition:width 0.4s; }
   .sbt-pct-num { font-family:'JetBrains Mono',monospace; font-size:0.64rem; color:var(--text2);
     min-width:40px; text-align:right; white-space:nowrap; }
+
+  /* ── Play-In Tournament ─────────────────────────────────────────────── */
+  .pi-banner { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
+    gap:10px; padding:10px 14px; border-radius:6px; margin-bottom:14px; }
+  .pi-banner-incomplete { background:rgba(201,168,76,0.07); border:1px solid rgba(201,168,76,0.28); }
+  .pi-banner-complete   { background:rgba(34,197,94,0.07);  border:1px solid rgba(34,197,94,0.3); }
+  .pi-banner-admin      { background:rgba(45,212,191,0.07); border:1px solid rgba(45,212,191,0.25); }
+  .pi-banner-title { font-family:'Bebas Neue',sans-serif; font-size:0.85rem; letter-spacing:2px; }
+  .pi-banner-sub { font-size:0.7rem; color:var(--text3); margin-top:2px; }
+
+  .pi-conf-label { font-family:'Bebas Neue',sans-serif; font-size:0.82rem; letter-spacing:3px;
+    text-transform:uppercase; display:flex; align-items:center; gap:10px; margin:16px 0 10px; }
+  .pi-conf-label::after { content:''; flex:1; height:1px; background:var(--border); }
+  .pi-conf-East  { color:rgba(123,159,245,0.85); }
+  .pi-conf-West  { color:rgba(251,146,60,0.85); }
+
+  .pi-game { background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:11px 13px; margin-bottom:10px; }
+  .pi-game-locked { opacity:0.4; pointer-events:none; }
+  .pi-game-hdr { display:flex; align-items:center; gap:10px; margin-bottom:9px; }
+  .pi-game-num { font-family:'Bebas Neue',sans-serif; font-size:0.75rem; letter-spacing:2px;
+    color:var(--gold); background:rgba(201,168,76,0.12); border:1px solid rgba(201,168,76,0.25);
+    border-radius:3px; padding:1px 7px; }
+  .pi-game-desc { font-size:0.65rem; color:var(--text3); letter-spacing:0.5px; }
+  .pi-game-settled { font-size:0.65rem; color:var(--green); font-family:'JetBrains Mono',monospace;
+    margin-left:auto; }
+
+  .pi-matchup { display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center; }
+  .pi-vs { font-size:0.65rem; color:var(--text3); text-align:center; font-weight:700; }
+
+  .pi-team { display:flex; flex-direction:column; align-items:center; gap:5px; padding:10px 6px 12px;
+    background:var(--surface3); border:1px solid var(--border2); border-radius:7px; cursor:pointer;
+    transition:all 0.15s; position:relative; }
+  .pi-team:hover:not(:disabled) { border-color:var(--gold); }
+  .pi-team:disabled { cursor:default; }
+  .pi-team.pi-sel   { background:rgba(201,168,76,0.1); border-color:var(--gold); }
+  .pi-team.pi-ok    { background:rgba(34,197,94,0.1);  border-color:var(--green); }
+  .pi-team.pi-wrong { background:rgba(239,68,68,0.05); border-color:rgba(239,68,68,0.2);
+    opacity:0.55; }
+  .pi-team.pi-tbd-slot { pointer-events:none; opacity:0.3; min-height:70px;
+    justify-content:center; border-style:dashed; }
+  .pi-team-name { font-size:0.68rem; font-weight:600; text-align:center; line-height:1.2;
+    color:var(--text2); max-width:80px; word-break:break-word; }
+  .pi-team.pi-sel   .pi-team-name { color:var(--gold2); }
+  .pi-team.pi-ok    .pi-team-name { color:var(--green); }
+  .pi-seed { position:absolute; bottom:4px; right:6px; font-size:0.58rem;
+    font-family:'JetBrains Mono',monospace; font-weight:800; color:var(--text3); opacity:0.6; }
+  .pi-team.pi-sel  .pi-seed { color:var(--gold2); opacity:1; }
+  .pi-team.pi-ok   .pi-seed { color:var(--green); opacity:1; }
+  .pi-tbd-label { font-size:0.6rem; color:var(--text3); letter-spacing:0.5px; }
+
+  /* Play-In TBD slot inside bracket matchup card */
+  .bm-team-pi-tbd { justify-content:center; gap:4px; min-height:42px;
+    border-style:dashed !important; border-color:rgba(201,168,76,0.3) !important;
+    background:rgba(201,168,76,0.04) !important; cursor:default !important; }
+  .bm-team-pi-tbd-text { font-size:0.6rem; color:var(--gold); letter-spacing:0.8px;
+    font-weight:700; opacity:0.7; }
 
   /* Tabs */
   .tabs { display:flex; border-bottom:1px solid var(--border); margin:20px 0 28px; }
@@ -808,6 +917,11 @@ function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFin
           <span className="bm-name">{series.bottom}</span>
           {bottomSeed != null && <span className="bm-seed">#{bottomSeed}</span>}
         </button>
+      ) : series.bottom === "Play-In TBD" ? (
+        <button className="bm-team bm-team-pi-tbd" disabled aria-label="Play-In TBD — make Play-In picks first">
+          <span style={{fontSize:'0.75rem'}}>🏀</span>
+          <span className="bm-team-pi-tbd-text">PLAY-IN TBD</span>
+        </button>
       ) : (
         <button className="bm-team bm-team-tbd" disabled aria-label="TBD — pick upstream matchup first" />
       )}
@@ -858,7 +972,7 @@ function nextRoundTops(srcTops, cardH) {
   return out;
 }
 
-function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksForScenario, onScenarioPick }) {
+function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksForScenario, onScenarioPick, playInSeeds }) {
   // Measure the container width so cards stretch to fill it
   const containerRef = useRef(null);
   const [containerW, setContainerW] = useState(900);
@@ -925,8 +1039,12 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
 
   // ── Card renderer ─────────────────────────────────────────────────────────
   function renderCard(sid, topPx, col) {
-    const series = seriesMap[sid];
+    let series = seriesMap[sid];
     if (!series) return null;
+    // Apply Play-In patches for affected R1 series (s1, s2, s5, s6)
+    if (playInSeeds !== undefined) {
+      series = applyPlayInPatch(series, playInSeeds);
+    }
     const round = roundMap[sid];
     const rs = getAdminResultForSeries(results, sid);
     const merged = { ...series, winner: rs?.winner ?? null, games: rs?.games ?? null };
@@ -1207,6 +1325,142 @@ function getAdminResultForSeries(results, sid) {
   return null;
 }
 
+// ─── Play-In Modal ────────────────────────────────────────────────────────────
+// Shown when user clicks the "🏀 Play-In" button in the Picks tab.
+// Lets each entry independently pick winners for all 6 play-in games.
+// Admin-set results override and lock individual game slots.
+
+function PlayInModal({ activeEntry, playInPicks, playInPicks2, playInResults, onPick, onClose }) {
+  const picks = activeEntry === 1 ? playInPicks : playInPicks2;
+
+  function renderConference(conf) {
+    const cfg   = PLAY_IN_CONFIG[conf];
+    const pfx   = conf === "East" ? "piE" : "piW";
+    const confColor = conf === "East" ? "rgba(123,159,245,0.85)" : "rgba(251,146,60,0.85)";
+
+    // For each game: admin result takes precedence over participant pick
+    const g1 = { id:`${pfx}1`, admin: playInResults?.[`${pfx}1`] || null, pick: picks[`${pfx}1`] || null };
+    const g2 = { id:`${pfx}2`, admin: playInResults?.[`${pfx}2`] || null, pick: picks[`${pfx}2`] || null };
+    const g3 = { id:`${pfx}3`, admin: playInResults?.[`${pfx}3`] || null, pick: picks[`${pfx}3`] || null };
+
+    // G3 teams depend on G1/G2 effective results
+    const g3Teams = getGame3Teams(conf, picks, playInResults);
+
+    function renderGame(game, teams, label, desc, seedNums) {
+      const settled     = !!game.admin;
+      const effectiveW  = game.admin || game.pick;
+      const canPick     = !settled && teams[0] && teams[1];
+
+      return (
+        <div className={`pi-game${!canPick && !settled && !(teams[0] && teams[1]) ? " pi-game-locked" : ""}`}>
+          <div className="pi-game-hdr">
+            <span className="pi-game-num">{label}</span>
+            <span className="pi-game-desc">{desc}</span>
+            {settled && <span className="pi-game-settled">✓ {shortTeamName(game.admin)}</span>}
+          </div>
+
+          {(teams[0] && teams[1]) ? (
+            <div className="pi-matchup">
+              {[0, 1].map(idx => {
+                const tname = teams[idx];
+                const seed  = seedNums ? seedNums[idx] : (TEAM_SEEDS[tname] ?? "");
+                const isW   = effectiveW === tname;
+                const isL   = effectiveW && effectiveW !== tname;
+                let cls = "";
+                if (settled)       cls = isW ? "pi-ok" : "pi-wrong";
+                else if (game.pick) cls = isW ? "pi-sel" : "";
+                return (
+                  <button key={tname}
+                    className={`pi-team ${cls}`}
+                    onClick={() => canPick && onPick(game.id, tname)}
+                    disabled={settled || !canPick}
+                  >
+                    <TeamLogo name={tname} size={32} state={settled ? (isW ? "ok" : "wrong") : (game.pick === tname ? "sel" : "")} />
+                    <span className="pi-team-name">{tname}</span>
+                    {seed !== "" && <span className="pi-seed">#{seed}</span>}
+                  </button>
+                );
+              })}
+              <span className="pi-vs" style={{gridColumn: '2'}}>vs</span>
+            </div>
+          ) : (
+            <div className="pi-matchup">
+              <div className="pi-team pi-tbd-slot"><span className="pi-tbd-label">TBD</span></div>
+              <span className="pi-vs">vs</span>
+              <div className="pi-team pi-tbd-slot"><span className="pi-tbd-label">TBD</span></div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div key={conf}>
+        <div className={`pi-conf-label pi-conf-${conf}`} style={{color: confColor}}>
+          {conf}ern Conference
+        </div>
+
+        {/* Game 1: seed7 vs seed8 → winner becomes #7 seed */}
+        {renderGame(g1,
+          [cfg.seed7, cfg.seed8],
+          "Game 1",
+          `Winner → ${conf[0]}7 Seed in Round 1`,
+          [7, 8]
+        )}
+
+        {/* Game 2: seed9 vs seed10 → winner advances to Game 3 */}
+        {renderGame(g2,
+          [cfg.seed9, cfg.seed10],
+          "Game 2",
+          "Winner advances to Game 3 · Loser eliminated",
+          [9, 10]
+        )}
+
+        {/* Game 3: loser(G1) vs winner(G2) → winner becomes #8 seed */}
+        {renderGame(g3,
+          [g3Teams.top, g3Teams.bottom],
+          "Game 3",
+          `Winner → ${conf[0]}8 Seed in Round 1  ·  complete Games 1 & 2 first`,
+          null
+        )}
+      </div>
+    );
+  }
+
+  const totalGames = 6;
+  const donePicks  = ["piE1","piE2","piE3","piW1","piW2","piW3"].filter(k => playInResults?.[k] || picks[k]).length;
+
+  return (
+    <div className="ov-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ov-modal" style={{maxWidth:680}}>
+        {/* Header */}
+        <div className="ov-hdr">
+          <div className="ov-hdr-left">
+            <div className="ov-title">🏀 Play-In Tournament</div>
+            <div className="ov-sub">
+              Entry {activeEntry} picks · {donePicks}/{totalGames} games picked
+              {playInResults && Object.keys(playInResults).length > 0 &&
+                <span style={{color:'var(--cyan)', marginLeft:8}}>· Admin results locked for settled games</span>}
+            </div>
+          </div>
+          <button className="ov-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="ov-body" style={{paddingTop:14}}>
+          <div style={{fontSize:'0.72rem', color:'var(--text3)', marginBottom:14, lineHeight:1.6}}>
+            Pick winners for each play-in game. Your choices determine which teams appear in
+            the <strong style={{color:'var(--text2)'}}>Round 1 #7 and #8 seed slots</strong> of your bracket.
+            Games settled by the admin are locked automatically.
+          </div>
+
+          {renderConference("East")}
+          {renderConference("West")}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Info Modal ───────────────────────────────────────────────────────────────
 
 function InfoModal({ tab, onClose }) {
@@ -1418,6 +1672,11 @@ export default function App() {
   const [adminDeadlineTime, setAdminDeadlineTime] = useState(""); // time input for admin editor
   const [scenarioEntry,  setScenarioEntry]  = useState(1);   // 1 or 2 — which entry to compare in Scenario
   const [infoOpen,      setInfoOpen]      = useState(false); // info/how-to-play panel
+  // ── Play-In state ──
+  const [playInPicks,   setPlayInPicks]   = useState({});  // entry 1 play-in picks (local)
+  const [playInPicks2,  setPlayInPicks2]  = useState({});  // entry 2 play-in picks (local)
+  const [playInResults, setPlayInResults] = useState(null); // admin-set actual play-in results
+  const [showPlayIn,    setShowPlayIn]    = useState(false); // play-in modal visibility
   const toastTimer = useRef(null);
 
   // ── Firebase listeners ──
@@ -1464,12 +1723,17 @@ export default function App() {
       }
     });
 
+    // Listen to admin-set play-in results
+    const unsubPlayIn = onValue(ref(db, "settings/playInResults"), snap => {
+      setPlayInResults(snap.exists() ? snap.val() : null);
+    });
+
     // Track Firebase Auth state — keeps admin logged in across page refreshes
     const unsubAuth = auth
       ? onAuthStateChanged(auth, user => setAdminAuthed(!!user))
       : () => {};
 
-    // Load my own saved picks (entry 1 and entry 2)
+    // Load my own saved picks (entry 1 and entry 2) + play-in picks
     const savedName = localStorage.getItem("pool_name");
     if (savedName) {
       const unsubMe = onValue(ref(db, `participants/${sanitize(savedName)}/picks`), snap => {
@@ -1478,10 +1742,16 @@ export default function App() {
       const unsubMe2 = onValue(ref(db, `participants/${sanitize(savedName)}/picks2`), snap => {
         if (snap.exists()) setMyPicks2(snap.val());
       });
-      return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubAuth(); unsubMe(); unsubMe2(); };
+      const unsubPIP = onValue(ref(db, `participants/${sanitize(savedName)}/playInPicks`), snap => {
+        if (snap.exists()) setPlayInPicks(snap.val());
+      });
+      const unsubPIP2 = onValue(ref(db, `participants/${sanitize(savedName)}/playInPicks2`), snap => {
+        if (snap.exists()) setPlayInPicks2(snap.val());
+      });
+      return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubPlayIn(); unsubAuth(); unsubMe(); unsubMe2(); unsubPIP(); unsubPIP2(); };
     }
 
-    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubAuth(); };
+    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubPlayIn(); unsubAuth(); };
   }, []);
 
   const showToast = (msg) => {
@@ -1573,14 +1843,16 @@ export default function App() {
       if (activeEntry === 1) {
         // Entry 1: use set() to create/overwrite the whole record, preserving any existing entry 2
         await set(ref(db, `participants/${key}`), {
-          name:        myName.trim(),
-          email:       myEmail.trim(),
-          picks:       myPicks,
-          submittedAt: Date.now(),
+          name:         myName.trim(),
+          email:        myEmail.trim(),
+          picks:        myPicks,
+          playInPicks:  Object.keys(playInPicks).length > 0 ? playInPicks : null,
+          submittedAt:  Date.now(),
           // Preserve entry 2 data if it already exists
           ...(participants[key]?.picks2        ? { picks2:        participants[key].picks2        } : {}),
           ...(participants[key]?.submittedAt2  ? { submittedAt2:  participants[key].submittedAt2  } : {}),
           ...(participants[key]?.name2         ? { name2:         participants[key].name2         } : {}),
+          ...(participants[key]?.playInPicks2  ? { playInPicks2:  participants[key].playInPicks2  } : {}),
         });
         localStorage.setItem("pool_name",      myName.trim());
         localStorage.setItem("pool_submitted", "1");
@@ -1593,6 +1865,7 @@ export default function App() {
         const email2Value = myEmail2.trim() || myEmail.trim();
         await update(ref(db), {
           [`participants/${key}/picks2`]:       myPicks2,
+          [`participants/${key}/playInPicks2`]: Object.keys(playInPicks2).length > 0 ? playInPicks2 : null,
           [`participants/${key}/submittedAt2`]: Date.now(),
           [`participants/${key}/name2`]:        name2Value,
           [`participants/${key}/email2`]:       email2Value,
@@ -1642,6 +1915,40 @@ export default function App() {
     try {
       if (auth) await signOut(auth);
     } catch (e) { console.error(e); }
+  };
+
+  // ── Play-In: participant pick handler ──
+  const handlePlayInPick = (gameId, winner) => {
+    const doUpdate = (prev) => {
+      const next = { ...prev, [gameId]: winner };
+      // Deselect if picking the already-selected winner (toggle)
+      if (prev[gameId] === winner) { delete next[gameId]; }
+      // Clear Game 3 pick if Game 1 or Game 2 changes (G3 teams depend on them)
+      const isEast = gameId.startsWith("piE");
+      const g3Key  = isEast ? "piE3" : "piW3";
+      if (gameId !== g3Key && (gameId.endsWith("1") || gameId.endsWith("2"))) {
+        delete next[g3Key];
+      }
+      return next;
+    };
+    if (activeEntry === 1) setPlayInPicks(doUpdate);
+    else                   setPlayInPicks2(doUpdate);
+  };
+
+  // ── Admin: save a play-in game result ──
+  const handleAdminPlayIn = async (gameId, winner) => {
+    try {
+      if (winner) {
+        await set(ref(db, `settings/playInResults/${gameId}`), winner);
+      } else {
+        // Clear the result
+        await set(ref(db, `settings/playInResults/${gameId}`), null);
+      }
+      showToast("✓ Play-In result saved");
+    } catch (e) {
+      showToast("Error saving Play-In result");
+      console.error(e);
+    }
   };
 
   // ── Admin: picks lock toggle ──
@@ -1780,6 +2087,19 @@ export default function App() {
   const scenarioResults     = buildScenarioResults(results, scenarioPicks);
   const scenarioLeaderboard = buildLeaderboard(flatParticipants, scenarioResults);
 
+  // ── Play-In: effective seeds for each context ──
+  // Active participant (Picks tab): admin results override their own picks
+  const activePlayInPicks  = activeEntry === 1 ? playInPicks  : playInPicks2;
+  const activePlayInSeeds  = resolveEffectiveSeeds(activePlayInPicks, playInResults);
+  // Are ALL 6 play-in games decided (picked or admin-settled)?
+  const piAllGames = ["piE1","piE2","piE3","piW1","piW2","piW3"];
+  const piDoneCount = piAllGames.filter(k => playInResults?.[k] || activePlayInPicks[k]).length;
+  const piComplete  = piDoneCount === piAllGames.length;
+  // Scenario tab: only use admin play-in results
+  const scenarioPlayInSeeds = resolveEffectiveSeeds({}, playInResults);
+  // Admin bracket display: use actual play-in results only
+  const adminPlayInSeeds = resolveEffectiveSeeds({}, playInResults);
+
   // ── Admin: resolve bracket using actual results so later rounds show real team names ──
   const resultsAsPicks = {};
   (Array.isArray(results?.rounds) ? results.rounds : Object.values(results?.rounds || {}))
@@ -1787,7 +2107,12 @@ export default function App() {
     .forEach(s => {
       if (s?.id && s?.winner) resultsAsPicks[s.id] = { winner: s.winner, games: s.games };
     });
-  const resolvedAdminRounds = resolveBracket(resultsAsPicks);
+  const resolvedAdminRoundsRaw = resolveBracket(resultsAsPicks);
+  // Apply play-in patches so admin sees correct #7/#8 teams in s1/s2/s5/s6
+  const resolvedAdminRounds = resolvedAdminRoundsRaw.map(round => ({
+    ...round,
+    series: round.series.map(s => applyPlayInPatch(s, adminPlayInSeeds)),
+  }));
 
   if (loading) return (
     <>
@@ -1899,8 +2224,41 @@ export default function App() {
               </div>
             )}
 
+            {/* Play-In tournament banner */}
+            {(() => {
+              const adminSettled = playInResults && Object.keys(playInResults).length > 0;
+              const bannerClass  = adminSettled ? "pi-banner pi-banner-admin"
+                                 : piComplete   ? "pi-banner pi-banner-complete"
+                                 :                "pi-banner pi-banner-incomplete";
+              const titleColor   = adminSettled ? "var(--cyan)"
+                                 : piComplete   ? "var(--green)"
+                                 :                "var(--gold)";
+              const btnLabel     = piComplete || adminSettled ? "✏ Edit Play-In Picks" : "📋 Make Play-In Picks";
+              return (
+                <div className={bannerClass}>
+                  <div>
+                    <div className="pi-banner-title" style={{color: titleColor}}>
+                      🏀 PLAY-IN TOURNAMENT
+                    </div>
+                    <div className="pi-banner-sub">
+                      {adminSettled
+                        ? `Admin has locked play-in results · ${piDoneCount}/6 games settled`
+                        : piComplete
+                          ? `All ${piAllGames.length} play-in picks complete — R1 matchups unlocked`
+                          : `${piDoneCount}/${piAllGames.length} play-in picks made — pick winners to unlock all R1 matchups`}
+                    </div>
+                  </div>
+                  <button className={`btn ${piComplete || adminSettled ? "btn-ghost" : "btn-gold"}`}
+                    style={{fontSize:'0.76rem', padding:'8px 18px', flexShrink:0}}
+                    onClick={() => setShowPlayIn(true)}>
+                    {btnLabel}
+                  </button>
+                </div>
+              );
+            })()}
+
             <div className="bracket-print-wrapper">
-              <BracketView picks={activePicks} onPick={handlePick} readOnly={picksLocked} results={results} />
+              <BracketView picks={activePicks} onPick={handlePick} readOnly={picksLocked} results={results} playInSeeds={activePlayInSeeds} />
             </div>
 
             {/* Submit */}
@@ -2155,6 +2513,7 @@ export default function App() {
                             : (Object.keys(myPicks2).length > 0 ? myPicks2 : (participants[myKey]?.picks2 || {}))
                         }
                         onScenarioPick={handleScenarioPick}
+                        playInSeeds={scenarioPlayInSeeds}
                       />
                     </div>
                   </div>
@@ -2440,6 +2799,79 @@ export default function App() {
               )}
             </div>
 
+            {/* ── Play-In Tournament Results ── */}
+            <div style={{
+              background:'var(--surface)', border:'1px solid rgba(201,168,76,0.3)',
+              borderRadius:8, padding:'14px 18px', marginBottom:16,
+            }}>
+              <div className="sec" style={{marginBottom:12, color:'var(--gold)'}}>
+                🏀 Play-In Tournament Results
+              </div>
+              <div className="xs muted" style={{marginBottom:14}}>
+                Set actual play-in winners. These override participant play-in picks and lock the #7/#8 seed slots for everyone.
+              </div>
+              {["East","West"].map(conf => {
+                const cfg = PLAY_IN_CONFIG[conf];
+                const pfx = conf === "East" ? "piE" : "piW";
+                const g1Id = `${pfx}1`, g2Id = `${pfx}2`, g3Id = `${pfx}3`;
+                const confColor = conf === "East" ? "rgba(123,159,245,0.85)" : "rgba(251,146,60,0.85)";
+                const g3t = getGame3Teams(conf, {}, playInResults);
+                const games = [
+                  {
+                    id: g1Id,
+                    label: `Game 1 — ${conf}ern #7 Seed`,
+                    desc:  `Winner advances as #7 seed`,
+                    top:   cfg.seed7, bottom: cfg.seed8
+                  },
+                  {
+                    id: g2Id,
+                    label: `Game 2 — ${conf}ern #9 vs #10`,
+                    desc:  `Winner advances to Game 3`,
+                    top:   cfg.seed9, bottom: cfg.seed10
+                  },
+                  {
+                    id: g3Id,
+                    label: `Game 3 — ${conf}ern #8 Seed`,
+                    desc:  `Winner advances as #8 seed`,
+                    top:   g3t.top   || "Loser of Game 1",
+                    bottom: g3t.bottom || "Winner of Game 2",
+                    disabled: !g3t.ready,
+                  },
+                ];
+                return (
+                  <div key={conf} style={{marginBottom:12}}>
+                    <div style={{fontFamily:"'Bebas Neue',sans-serif", fontSize:'0.72rem',
+                      letterSpacing:'2.5px', color: confColor, marginBottom:8}}>
+                      {conf}ern Conference
+                    </div>
+                    {games.map(game => (
+                      <div key={game.id} className="asc" style={{marginBottom:6, opacity: game.disabled ? 0.4 : 1}}>
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap'}}>
+                          <div>
+                            <div className="xs" style={{color:'var(--text2)', fontWeight:600}}>{game.label}</div>
+                            <div className="xs muted" style={{marginTop:2}}>{game.desc}</div>
+                          </div>
+                          <div className="arow" style={{margin:0}}>
+                            <select className="sel" style={{minWidth:180}}
+                              value={playInResults?.[game.id] || ""}
+                              disabled={game.disabled}
+                              onChange={e => handleAdminPlayIn(game.id, e.target.value)}>
+                              <option value="">— TBD —</option>
+                              {game.top    && <option value={game.top}>{game.top}</option>}
+                              {game.bottom && <option value={game.bottom}>{game.bottom}</option>}
+                            </select>
+                            {playInResults?.[game.id] && (
+                              <span className="xs green mono">✓ {shortTeamName(playInResults[game.id])}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+
             <div className="alert alert-warn mb16">
               ⚠ Admin panel — enter series results here. Standings update automatically for all users.
             </div>
@@ -2553,7 +2985,8 @@ export default function App() {
                 </div>
 
                 {/* Bracket view — read-only */}
-                <BracketView picks={ep.picks || {}} readOnly results={results} />
+                <BracketView picks={ep.picks || {}} readOnly results={results}
+                  playInSeeds={resolveEffectiveSeeds(ep.playInPicks || {}, playInResults)} />
               </div>
             </div>
           </div>
@@ -2561,6 +2994,18 @@ export default function App() {
       })()}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {/* ══ PLAY-IN MODAL ═══════════════════════════════════════════════════ */}
+      {showPlayIn && (
+        <PlayInModal
+          activeEntry={activeEntry}
+          playInPicks={playInPicks}
+          playInPicks2={playInPicks2}
+          playInResults={playInResults}
+          onPick={handlePlayInPick}
+          onClose={() => setShowPlayIn(false)}
+        />
+      )}
 
       {/* ══ INFO / HOW TO PLAY PANEL ════════════════════════════════════════ */}
       {infoOpen && <InfoModal tab={tab} onClose={() => setInfoOpen(false)} />}
