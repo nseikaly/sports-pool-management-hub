@@ -723,7 +723,12 @@ function resolveBracket(picks) {
 // play-in slots are patched with the actual/predicted teams before validating,
 // so a pick of e.g. "Chicago Bulls" in s1 is valid when CHI is the effective E8.
 function cleanDownstreamPicks(picks, basePicks = {}, playInSeeds = null) {
-  let cleaned = picks;
+  // First, perform any virtual substitutions for confirmed play-in winners so
+  // old teams are replaced by their actual replacements before we start
+  // clearing invalid downstream picks.  This allows the value to propagate
+  // instead of being wiped out entirely.
+  let cleaned = playInSeeds ? virtualSubstitutePicksForPlayIn(picks, playInSeeds) : { ...picks };
+
   for (let pass = 0; pass < 3; pass++) {
     // Merge admin-settled results (basePicks) so resolveBracket can substitute
     // real team names instead of BRACKET_CONFIG placeholders.
@@ -738,6 +743,25 @@ function cleanDownstreamPicks(picks, basePicks = {}, playInSeeds = null) {
         const effectiveSeries = playInSeeds ? applyPlayInPatch(series, playInSeeds) : series;
         const pick = cleaned[series.id];
         if (pick?.winner && pick.winner !== effectiveSeries.top && pick.winner !== effectiveSeries.bottom) {
+          // If the pick was one of the displaced play-in losers, substitute
+          // it instead of dropping it (this shouldn't normally happen here
+          // because we already ran virtualSubstitutePicksForPlayIn above, but
+          // leave the check for safety).
+          if (playInSeeds) {
+            const subs = {};
+            Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
+              const actual = playInSeeds[seedKey];
+              const orig = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid)?.bottom;
+              if (orig && actual && pick.winner === orig) {
+                subs[pick.winner] = actual;
+              }
+            });
+            const replacement = subs[pick.winner];
+            if (replacement) {
+              cleaned = { ...cleaned, [series.id]: { ...pick, winner: replacement } };
+              continue;
+            }
+          }
           cleaned = { ...cleaned, [series.id]: { ...pick, winner: undefined } };
         }
       }
@@ -1807,8 +1831,8 @@ export default function App() {
       });
     const piSeeds1 = resolveEffectiveSeeds(playInPicks  || {}, playInResults);
     const piSeeds2 = resolveEffectiveSeeds(playInPicks2 || {}, playInResults);
-    setMyPicks(prev => cleanDownstreamPicks(prev, resultsAsPicks, piSeeds1));
-    setMyPicks2(prev => cleanDownstreamPicks(prev, resultsAsPicks, piSeeds2));
+    setMyPicks(prev => cleanDownstreamPicks(virtualSubstitutePicksForPlayIn(prev, piSeeds1), resultsAsPicks, piSeeds1));
+    setMyPicks2(prev => cleanDownstreamPicks(virtualSubstitutePicksForPlayIn(prev, piSeeds2), resultsAsPicks, piSeeds2));
   }, [results, playInResults, playInPicks, playInPicks2]);
 
   const toastTimer = useRef(null);
