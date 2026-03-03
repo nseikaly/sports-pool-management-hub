@@ -3139,3 +3139,31 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Bracket view — read-only */}
+                <BracketView picks={ep.picks || {}} readOnly results={results}
+                  playInSeeds={resolveEffectiveSeeds(ep.playInPicks || {}, playInResults)} />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {toast && <div className="toast">{toast}</div>}
+
+      {/* ══ PLAY-IN MODAL ═══════════════════════════════════════════════════ */}
+      {showPlayIn && (
+        <PlayInModal
+          activeEntry={activeEntry}
+          playInPicks={playInPicks}
+          playInPicks2={playInPicks2}
+          playInResults={playInResults}
+          onPick={handlePlayInPick}
+          onClose={() => setShowPlayIn(false)}
+        />
+      )}
+
+      {/* ══ INFO / HOW TO PLAY PANEL ════════════════════════════════════════ */}
+      {infoOpen && <InfoModal tab={tab} onClose={() => setInfoOpen(false)} />}
+    </>
+  );
+}
