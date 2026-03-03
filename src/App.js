@@ -19,6 +19,30 @@ Object.values(PLAY_IN_CONFIG).forEach(conf => {
   TEAM_SEEDS[conf.seed10] = 10;
 });
 
+// Return a mapping of team -> seed for display, taking into account any
+// confirmed/predicted play-in winners. If `playInSeeds` is provided it will
+// override the #9/#10 mapping and assign the promoted teams to #7 or #8.
+function computeDisplaySeeds(playInSeeds) {
+  const display = { ...TEAM_SEEDS };
+  if (!playInSeeds) return display;
+  // playInSeeds keys: E7, E8, W7, W8 -> team names (or null)
+  ["E7","E8","W7","W8"].forEach(k => {
+    const t = playInSeeds[k];
+    if (!t) return;
+    const seedNum = k.endsWith("7") ? 7 : 8;
+    display[t] = seedNum; // override any existing 9/10 mapping
+  });
+  return display;
+}
+
+// Helper: return a seed string/number for a team, preferring any play-in
+// overrides. Returns empty string when no seed known.
+function seedFor(team, playInSeeds) {
+  if (!team) return "";
+  const display = computeDisplaySeeds(playInSeeds);
+  return display[team] ?? "";
+}
+
 // ─── Play-In helpers ──────────────────────────────────────────────────────────
 
 // Given a participant's play-in picks + admin results, returns the effective
@@ -722,9 +746,9 @@ function SeriesCard({ series, round, picks, onPick, readOnly, adminMode, results
   const settled = result?.winner != null;
 
   // Seed resolution — works for any round once teams are known
-  const topSeed    = TEAM_SEEDS[series.top];
-  const bottomSeed = TEAM_SEEDS[series.bottom];
-  const showSeedVs = topSeed != null && bottomSeed != null;
+  const topSeed    = seedFor(series.top);
+  const bottomSeed = seedFor(series.bottom);
+  const showSeedVs = (topSeed !== "" && bottomSeed !== "");
 
   const pickWinner = (team) => { if (!readOnly && !adminMode) onPick(series.id, { ...pick, winner: team }); };
   const pickGames  = (g)    => { if (!readOnly && !adminMode) onPick(series.id, { ...pick, games: g }); };
@@ -772,13 +796,13 @@ function SeriesCard({ series, round, picks, onPick, readOnly, adminMode, results
             <button className={`tbtn ${teamClass(series.top)}`}    onClick={() => pickWinner(series.top)}    disabled={readOnly}>
               <span className="tbtn-logo"><TeamLogo name={series.top}    size={46} state={teamClass(series.top)}    /></span>
               <span className="tbtn-name">{series.top}</span>
-              {topSeed != null && <span className="tbtn-seed">#{topSeed}</span>}
+              {topSeed !== "" && <span className="tbtn-seed">#{topSeed}</span>}
             </button>
             <span className="vs">vs</span>
             <button className={`tbtn ${teamClass(series.bottom)}`} onClick={() => pickWinner(series.bottom)} disabled={readOnly}>
               <span className="tbtn-logo"><TeamLogo name={series.bottom} size={46} state={teamClass(series.bottom)} /></span>
               <span className="tbtn-name">{series.bottom}</span>
-              {bottomSeed != null && <span className="tbtn-seed">#{bottomSeed}</span>}
+              {bottomSeed !== "" && <span className="tbtn-seed">#{bottomSeed}</span>}
             </button>
           </div>
           <div className="gr">
@@ -828,20 +852,20 @@ function shortTeamName(fullName) {
 
 // ─── Bracket Matchup (compact card for bracket view) ─────────────────────
 
-function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost }) {
+function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost, playInSeeds }) {
   const pick   = picks?.[series.id] || {};
   const result = getAdminResultForSeries(results, series.id);
   const settled = result?.winner != null;
 
-  const topSeed    = TEAM_SEEDS[series.top];
-  const bottomSeed = TEAM_SEEDS[series.bottom];
+  const topSeed    = seedFor(series.top, playInSeeds);
+  const bottomSeed = seedFor(series.bottom, playInSeeds);
 
   // A slot is "real" when its team name is a known seeded (R1) team, or when the
   // series is already settled by admin results. Unresolved later-round slots whose
   // upstream pick hasn't been made yet keep a placeholder name (not in TEAM_SEEDS)
   // and should be shown as blank/non-interactive.
-  const topIsReal    = (series.top    in TEAM_SEEDS) || settled;
-  const bottomIsReal = (series.bottom in TEAM_SEEDS) || settled;
+  const topIsReal    = (seedFor(series.top, playInSeeds) !== "") || settled;
+  const bottomIsReal = (seedFor(series.bottom, playInSeeds) !== "") || settled;
   const bothReal     = topIsReal && bottomIsReal;
 
   const pickWinner = (team) => {
@@ -1183,6 +1207,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
             eliminatedTeams={eliminatedTeams}
             topGhost={topGhost}
             bottomGhost={bottomGhost}
+            playInSeeds={playInSeeds}
           />
         </div>
       );
@@ -1195,6 +1220,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
           onPick={onPick} readOnly={readOnly} results={results}
           isFinals={sid === "s15"}
           eliminatedTeams={eliminatedTeams}
+          playInSeeds={playInSeeds}
         />
       </div>
     );
@@ -2724,7 +2750,7 @@ export default function App() {
                 {resolvedAdminRounds.map((round) => {
                 // Only show series where both teams are known real teams (resolved from admin results)
                 const resolvedSeries = round.series.filter(s =>
-                  s.top in TEAM_SEEDS && s.bottom in TEAM_SEEDS
+                  seedFor(s.top, adminPlayInSeeds) !== "" && seedFor(s.bottom, adminPlayInSeeds) !== ""
                 );
                 if (resolvedSeries.length === 0) return null;
 
