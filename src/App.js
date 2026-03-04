@@ -2180,6 +2180,17 @@ export default function App() {
     setScenarioPlayInPicks(prev => ({ ...prev, [gameId]: team }));
   };
 
+  const handleScenarioAutoFill = () => {
+    const eliminated = getEliminatedTeams(results);
+    // Use whichever entry is selected in the scenario toggle
+    const srcPicks = scenarioEntry === 1 ? myPicks : myPicks2;
+    const filled = {};
+    Object.entries(srcPicks).forEach(([sid, pick]) => {
+      if (pick?.winner && !eliminated.has(pick.winner)) filled[sid] = pick;
+    });
+    setScenarioPicks(filled);
+  };
+
   const handleScenarioClear = () => {
     setScenarioPicks({});
     setScenarioPlayInPicks({});
