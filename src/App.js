@@ -1172,7 +1172,8 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
   }));
 
   // ── Eliminated teams (computed once for this bracket render) ─────────────
-  const eliminatedTeams = getEliminatedTeams(results);
+  // Pass play-in seeds so R1 losers reflect promoted teams correctly
+  const eliminatedTeams = getEliminatedTeams(results, playInSeeds);
 
   // ── Card renderer ─────────────────────────────────────────────────────────
   function renderCard(sid, topPx, col) {
@@ -2181,7 +2182,7 @@ export default function App() {
   };
 
   const handleScenarioAutoFill = () => {
-    const eliminated = getEliminatedTeams(results);
+    const eliminated = getEliminatedTeams(results, adminPlayInSeeds);
     // Use whichever entry is selected in the scenario toggle
     const srcPicks = scenarioEntry === 1 ? myPicks : myPicks2;
     const filled = {};
@@ -2267,9 +2268,19 @@ export default function App() {
       flatParticipants[key + '__2'] = { ...p, picks: subPicks2 };
     }
   });
-  const leaderboard = buildLeaderboard(flatParticipants, results);
+  // Compute admin play-in effective seeds so R1 slots reflect actual promoted teams
+  const adminPlayInSeeds = resolveEffectiveSeeds({}, playInResults);
+  // Build a results object with BRACKET_CONFIG structure populated with admin results
+  // and apply play-in patches so scoring/elimination logic sees the correct R1 teams.
+  const resultsWithAdminPlayIn = buildScenarioResults(results, {});
+  resultsWithAdminPlayIn.rounds = resultsWithAdminPlayIn.rounds.map(r => ({
+    ...r,
+    series: r.series.map(s => applyPlayInPatch(s, adminPlayInSeeds)),
+  }));
+
+  const leaderboard = buildLeaderboard(flatParticipants, resultsWithAdminPlayIn);
   const topPts      = leaderboard[0]?.points || 1;
-  const eliminatedTeams = getEliminatedTeams(results);
+  const eliminatedTeams = getEliminatedTeams(results, adminPlayInSeeds);
 
   // ── Pool stats ──
   const completedCount = (Array.isArray(results?.rounds) ? results.rounds : Object.values(results?.rounds || {}))
@@ -2290,8 +2301,6 @@ export default function App() {
   const piComplete  = piDoneCount === piAllGames.length;
   // Scenario tab: use scenario play-in picks + admin results
   const scenarioPlayInSeeds = resolveEffectiveSeeds(scenarioPlayInPicks, playInResults);
-  // Admin bracket display: use actual play-in results only
-  const adminPlayInSeeds = resolveEffectiveSeeds({}, playInResults);
 
   // ── Admin: resolve bracket using actual results so later rounds show real team names ──
   const resultsAsPicks = {};
