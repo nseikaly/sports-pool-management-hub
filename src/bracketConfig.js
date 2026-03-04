@@ -15,7 +15,7 @@ export const BRACKET_CONFIG = {
       series: [
         { id:"s1",  top:"Detroit Pistons",         bottom:"Miami Heat",           conference:"East", topSeed:1, bottomSeed:8 },
         { id:"s2",  top:"Boston Celtics",          bottom:"Orlando Magic",        conference:"East", topSeed:2, bottomSeed:7 },
-        { id:"s3",  top:"New York Knicks",         bottom:"Cleveland Cavaliers",   conference:"East", topSeed:3, bottomSeed:6 },
+        { id:"s3",  top:"New York Knicks",         bottom:"Philadelphia 76ers",   conference:"East", topSeed:3, bottomSeed:6 },
         { id:"s4",  top:"Cleveland Cavaliers",      bottom:"Toronto Raptors",      conference:"East", topSeed:4, bottomSeed:5 },
         { id:"s5",  top:"Oklahoma City Thunder",    bottom:"Golden State Warriors",conference:"West", topSeed:1, bottomSeed:8 },
         { id:"s6",  top:"San Antonio Spurs",        bottom:"Phoenix Suns",         conference:"West", topSeed:2, bottomSeed:7 },
