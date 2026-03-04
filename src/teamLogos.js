@@ -2,6 +2,7 @@
 // Inline SVG badges — no image files needed. Add or edit teams below.
 
 const TEAMS = {
+  // ── East ──────────────────────────────────────────────────────────────────
   "Boston Celtics":         { abbr:"BOS", primary:"#007A33", secondary:"#BA9653" },
   "Miami Heat":             { abbr:"MIA", primary:"#98002E", secondary:"#F9A01B" },
   "Milwaukee Bucks":        { abbr:"MIL", primary:"#00471B", secondary:"#EEE1C6" },
@@ -10,22 +11,18 @@ const TEAMS = {
   "Orlando Magic":          { abbr:"ORL", primary:"#0077C0", secondary:"#FFFFFF" },
   "New York Knicks":        { abbr:"NYK", primary:"#006BB6", secondary:"#F58426" },
   "Philadelphia 76ers":     { abbr:"PHI", primary:"#006BB6", secondary:"#ED174C" },
+  // ── West ──────────────────────────────────────────────────────────────────
   "Oklahoma City Thunder":  { abbr:"OKC", primary:"#007AC1", secondary:"#EF3B24" },
   "New Orleans Pelicans":   { abbr:"NOP", primary:"#0C2340", secondary:"#C8102E" },
   "Denver Nuggets":         { abbr:"DEN", primary:"#0E2240", secondary:"#FEC524" },
-  "Los Angeles Lakers":     { abbr:"LAL", primary:"#552583", secondary:"#FDB927" },
+  "LA Lakers":              { abbr:"LAL", primary:"#552583", secondary:"#FDB927" },
   "Minnesota Timberwolves": { abbr:"MIN", primary:"#0C2340", secondary:"#78BE20" },
   "Phoenix Suns":           { abbr:"PHX", primary:"#1D1160", secondary:"#E56020" },
-  "Los Angeles Clippers":   { abbr:"LAC", primary:"#C8102E", secondary:"#BEC0C2" },
+  "LA Clippers":            { abbr:"LAC", primary:"#C8102E", secondary:"#BEC0C2" },
   "Dallas Mavericks":       { abbr:"DAL", primary:"#00538C", secondary:"#B8C4CA" },
+  // ── Play-In teams (seeds 9 & 10) ──────────────────────────────────────────
   "Chicago Bulls":          { abbr:"CHI", primary:"#CE1141", secondary:"#FFFFFF" },
   "Detroit Pistons":        { abbr:"DET", primary:"#006BB6", secondary:"#C8102E" },
-  "Toronto Raptors":        { abbr:"TOR", primary:"#CE1141", secondary:"#000000" },
-  "Charlotte Hornets":      { abbr:"CHA", primary:"#1D1160", secondary:"#A1A1A4" },
-  "Atlanta Hawks":          { abbr:"ATL", primary:"#E03A3E", secondary:"#C1D32F" },
-  "Houston Rockets":        { abbr:"HOU", primary:"#CE1141", secondary:"#000000" },
-  "Golden State Warriors":  { abbr:"GSW", primary:"#1D428A", secondary:"#FFC72C" },
-  "Portland Trail Blazers": { abbr:"POR", primary:"#E03A3E", secondary:"#000000" },
   "San Antonio Spurs":      { abbr:"SAS", primary:"#000000", secondary:"#C4CED4" },
   "Sacramento Kings":       { abbr:"SAC", primary:"#5A2D81", secondary:"#63727A" },
 };
