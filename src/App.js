@@ -19,30 +19,6 @@ Object.values(PLAY_IN_CONFIG).forEach(conf => {
   TEAM_SEEDS[conf.seed10] = 10;
 });
 
-// Return a mapping of team -> seed for display, taking into account any
-// confirmed/predicted play-in winners. If `playInSeeds` is provided it will
-// override the #9/#10 mapping and assign the promoted teams to #7 or #8.
-function computeDisplaySeeds(playInSeeds) {
-  const display = { ...TEAM_SEEDS };
-  if (!playInSeeds) return display;
-  // playInSeeds keys: E7, E8, W7, W8 -> team names (or null)
-  ["E7","E8","W7","W8"].forEach(k => {
-    const t = playInSeeds[k];
-    if (!t) return;
-    const seedNum = k.endsWith("7") ? 7 : 8;
-    display[t] = seedNum; // override any existing 9/10 mapping
-  });
-  return display;
-}
-
-// Helper: return a seed string/number for a team, preferring any play-in
-// overrides. Returns empty string when no seed known.
-function seedFor(team, playInSeeds) {
-  if (!team) return "";
-  const display = computeDisplaySeeds(playInSeeds);
-  return display[team] ?? "";
-}
-
 // ─── Play-In helpers ──────────────────────────────────────────────────────────
 
 // Given a participant's play-in picks + admin results, returns the effective
@@ -53,20 +29,12 @@ function resolveEffectiveSeeds(participantPicks, adminResults) {
   ["piE1","piE2","piE3","piW1","piW2","piW3"].forEach(k => {
     eff[k] = adminResults?.[k] || participantPicks?.[k] || null;
   });
-  const out = {
+  return {
     E7: eff.piE1 || null,
     E8: eff.piE3 || null,
     W7: eff.piW1 || null,
     W8: eff.piW3 || null,
   };
-  // Warn if admin/participant data produced identical teams for 7 & 8 seeds
-  if (out.E7 && out.E8 && out.E7 === out.E8) {
-    console.warn("resolveEffectiveSeeds: East seeds 7 and 8 are the same team", out.E7);
-  }
-  if (out.W7 && out.W8 && out.W7 === out.W8) {
-    console.warn("resolveEffectiveSeeds: West seeds 7 and 8 are the same team", out.W7);
-  }
-  return out;
 }
 
 // Applies play-in seed overrides to an R1 series.
@@ -215,12 +183,9 @@ const css = `
   /* Play-In TBD slot inside bracket matchup card */
   .bm-team-pi-tbd { justify-content:center; gap:4px; min-height:42px;
     border-style:dashed !important; border-color:rgba(201,168,76,0.3) !important;
-    background:rgba(201,168,76,0.04) !important; cursor:pointer !important; }
-  .bm-team-pi-tbd:hover { border-color:rgba(201,168,76,0.65) !important;
-    background:rgba(201,168,76,0.1) !important; }
+    background:rgba(201,168,76,0.04) !important; cursor:default !important; }
   .bm-team-pi-tbd-text { font-size:0.6rem; color:var(--gold); letter-spacing:0.8px;
     font-weight:700; opacity:0.7; }
-  .bm-team-pi-tbd:hover .bm-team-pi-tbd-text { opacity:1; }
 
   /* Tabs */
   .tabs { display:flex; border-bottom:1px solid var(--border); margin:20px 0 28px; }
@@ -240,7 +205,6 @@ const css = `
   .entry-btn.active { background:var(--gold); color:#111; }
   .entry-btn .entry-check { margin-left:5px; font-size:0.65rem; }
   .entry-btn.active .entry-check { color:#111; }
-  .entry-btn:disabled { opacity:0.45; cursor:default; }
 
   /* Legend */
   .legend { display:flex; gap:20px; flex-wrap:wrap; padding:11px 16px; background:var(--surface2);
@@ -724,12 +688,7 @@ function resolveBracket(picks) {
 // play-in slots are patched with the actual/predicted teams before validating,
 // so a pick of e.g. "Chicago Bulls" in s1 is valid when CHI is the effective E8.
 function cleanDownstreamPicks(picks, basePicks = {}, playInSeeds = null) {
-  // First, perform any virtual substitutions for confirmed play-in winners so
-  // old teams are replaced by their actual replacements before we start
-  // clearing invalid downstream picks.  This allows the value to propagate
-  // instead of being wiped out entirely.
-  let cleaned = playInSeeds ? virtualSubstitutePicksForPlayIn(picks, playInSeeds) : { ...picks };
-
+  let cleaned = picks;
   for (let pass = 0; pass < 3; pass++) {
     // Merge admin-settled results (basePicks) so resolveBracket can substitute
     // real team names instead of BRACKET_CONFIG placeholders.
@@ -744,25 +703,6 @@ function cleanDownstreamPicks(picks, basePicks = {}, playInSeeds = null) {
         const effectiveSeries = playInSeeds ? applyPlayInPatch(series, playInSeeds) : series;
         const pick = cleaned[series.id];
         if (pick?.winner && pick.winner !== effectiveSeries.top && pick.winner !== effectiveSeries.bottom) {
-          // If the pick was one of the displaced play-in losers, substitute
-          // it instead of dropping it (this shouldn't normally happen here
-          // because we already ran virtualSubstitutePicksForPlayIn above, but
-          // leave the check for safety).
-          if (playInSeeds) {
-            const subs = {};
-            Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
-              const actual = playInSeeds[seedKey];
-              const orig = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid)?.bottom;
-              if (orig && actual && pick.winner === orig) {
-                subs[pick.winner] = actual;
-              }
-            });
-            const replacement = subs[pick.winner];
-            if (replacement) {
-              cleaned = { ...cleaned, [series.id]: { ...pick, winner: replacement } };
-              continue;
-            }
-          }
           cleaned = { ...cleaned, [series.id]: { ...pick, winner: undefined } };
         }
       }
@@ -779,9 +719,9 @@ function SeriesCard({ series, round, picks, onPick, readOnly, adminMode, results
   const settled = result?.winner != null;
 
   // Seed resolution — works for any round once teams are known
-  const topSeed    = seedFor(series.top);
-  const bottomSeed = seedFor(series.bottom);
-  const showSeedVs = (topSeed !== "" && bottomSeed !== "");
+  const topSeed    = TEAM_SEEDS[series.top];
+  const bottomSeed = TEAM_SEEDS[series.bottom];
+  const showSeedVs = topSeed != null && bottomSeed != null;
 
   const pickWinner = (team) => { if (!readOnly && !adminMode) onPick(series.id, { ...pick, winner: team }); };
   const pickGames  = (g)    => { if (!readOnly && !adminMode) onPick(series.id, { ...pick, games: g }); };
@@ -829,13 +769,13 @@ function SeriesCard({ series, round, picks, onPick, readOnly, adminMode, results
             <button className={`tbtn ${teamClass(series.top)}`}    onClick={() => pickWinner(series.top)}    disabled={readOnly}>
               <span className="tbtn-logo"><TeamLogo name={series.top}    size={46} state={teamClass(series.top)}    /></span>
               <span className="tbtn-name">{series.top}</span>
-              {topSeed !== "" && <span className="tbtn-seed">#{topSeed}</span>}
+              {topSeed != null && <span className="tbtn-seed">#{topSeed}</span>}
             </button>
             <span className="vs">vs</span>
             <button className={`tbtn ${teamClass(series.bottom)}`} onClick={() => pickWinner(series.bottom)} disabled={readOnly}>
               <span className="tbtn-logo"><TeamLogo name={series.bottom} size={46} state={teamClass(series.bottom)} /></span>
               <span className="tbtn-name">{series.bottom}</span>
-              {bottomSeed !== "" && <span className="tbtn-seed">#{bottomSeed}</span>}
+              {bottomSeed != null && <span className="tbtn-seed">#{bottomSeed}</span>}
             </button>
           </div>
           <div className="gr">
@@ -885,20 +825,20 @@ function shortTeamName(fullName) {
 
 // ─── Bracket Matchup (compact card for bracket view) ─────────────────────
 
-function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost, playInSeeds }) {
+function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost }) {
   const pick   = picks?.[series.id] || {};
   const result = getAdminResultForSeries(results, series.id);
   const settled = result?.winner != null;
 
-  const topSeed    = seedFor(series.top, playInSeeds);
-  const bottomSeed = seedFor(series.bottom, playInSeeds);
+  const topSeed    = TEAM_SEEDS[series.top];
+  const bottomSeed = TEAM_SEEDS[series.bottom];
 
   // A slot is "real" when its team name is a known seeded (R1) team, or when the
   // series is already settled by admin results. Unresolved later-round slots whose
   // upstream pick hasn't been made yet keep a placeholder name (not in TEAM_SEEDS)
   // and should be shown as blank/non-interactive.
-  const topIsReal    = (seedFor(series.top, playInSeeds) !== "") || settled;
-  const bottomIsReal = (seedFor(series.bottom, playInSeeds) !== "") || settled;
+  const topIsReal    = (series.top    in TEAM_SEEDS) || settled;
+  const bottomIsReal = (series.bottom in TEAM_SEEDS) || settled;
   const bothReal     = topIsReal && bottomIsReal;
 
   const pickWinner = (team) => {
@@ -1039,68 +979,27 @@ function nextRoundTops(srcTops, cardH) {
   return out;
 }
 
-// Virtual-substitute picks for DISPLAY only: if admin/participant has confirmed
-// a play-in team for a slot and the stored pick references a DIFFERENT team,
-// replace that team with the actual play-in winner everywhere it appears in
-// later rounds (only where it is no longer a valid team in that series).
+// Virtual-clean picks for DISPLAY only: if admin/participant has confirmed a
+// play-in team for a slot and the stored pick references a DIFFERENT team (one
+// that no longer occupies that slot), clear it and cascade.
 // This does NOT modify stored data — it is only used when rendering the bracket.
-function virtualSubstitutePicksForPlayIn(picks, playInSeeds) {
+function virtualCleanPicksForPlayIn(picks, playInSeeds) {
   if (!playInSeeds) return picks;
-  let result = { ...picks };
-
-  // Step 1: Fix R1 play-in slots and record which teams need substitution.
-  // subs maps: wrongTeam → actualPlayInWinner
-  const subs = {};
+  let cleaned = { ...picks };
   Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
     const actualBottom = playInSeeds[seedKey];
     if (!actualBottom) return; // play-in result not yet known for this slot
     const r1Series = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
     if (!r1Series) return;
     const topTeam = r1Series.top;
-    const pick = result[sid];
+    const pick = cleaned[sid];
+    // If winner is neither the confirmed top seed nor the confirmed play-in team, clear it
     if (pick?.winner && pick.winner !== topTeam && pick.winner !== actualBottom) {
-      // Participant picked a team that is no longer in this slot — substitute
-      subs[pick.winner] = actualBottom;
-      result = { ...result, [sid]: { ...pick, winner: actualBottom } };
+      cleaned = { ...cleaned, [sid]: { ...pick, winner: undefined, games: undefined } };
     }
   });
-
-  if (Object.keys(subs).length === 0) return result;
-
-  // Step 2: Walk later rounds in order (R2 → R3 → Finals), substituting the
-  // old team with the new team ONLY where the old team is no longer available
-  // in that series (it may still be valid via a different upstream slot).
-  // Repeat up to 3 passes so that each level of the bracket gets corrected
-  // using the already-fixed upstream level.
-  for (let pass = 0; pass < 3; pass++) {
-    // Resolve the bracket using the latest corrected picks to see what teams
-    // are actually available in each later-round series.
-    const resolved = resolveBracket(result);
-    const seriesMap = {};
-    resolved.forEach(round => round.series.forEach(s => { seriesMap[s.id] = s; }));
-
-    let changed = false;
-    const nextResult = { ...result };
-
-    Object.entries(result).forEach(([sid, pick]) => {
-      if (!pick?.winner) return;
-      const newTeam = subs[pick.winner];
-      if (!newTeam) return; // this team doesn't need substitution
-      const series = seriesMap[sid];
-      if (!series) return;
-      // Only substitute if the old team is NOT present in this series.
-      // If it's still present (came from a different play-in slot), leave it.
-      if (series.top !== pick.winner && series.bottom !== pick.winner) {
-        nextResult[sid] = { ...pick, winner: newTeam };
-        changed = true;
-      }
-    });
-
-    result = nextResult;
-    if (!changed) break;
-  }
-
-  return result;
+  // Cascade: clear any downstream picks that now reference a team no longer present
+  return cleanDownstreamPicks(cleaned, {}, playInSeeds);
 }
 
 function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksForScenario, onScenarioPick, playInSeeds }) {
@@ -1159,7 +1058,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
   // finalized a play-in result, any stored picks referencing the wrong team are
   // stripped before resolveBracket propagates them into later rounds.
   const effectivePicks = (!scenarioMode && playInSeeds)
-    ? virtualSubstitutePicksForPlayIn(picks || {}, playInSeeds)
+    ? virtualCleanPicksForPlayIn(picks || {}, playInSeeds)
     : (picks || {});
   const resolveSource = scenarioMode
     ? resolveForScenario(myPicksForScenario || {}, picks || {}, results)
@@ -1240,7 +1139,6 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
             eliminatedTeams={eliminatedTeams}
             topGhost={topGhost}
             bottomGhost={bottomGhost}
-            playInSeeds={playInSeeds}
           />
         </div>
       );
@@ -1253,7 +1151,6 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
           onPick={onPick} readOnly={readOnly} results={results}
           isFinals={sid === "s15"}
           eliminatedTeams={eliminatedTeams}
-          playInSeeds={playInSeeds}
         />
       </div>
     );
@@ -1816,26 +1713,6 @@ export default function App() {
   const [playInPicks2,  setPlayInPicks2]  = useState({});  // entry 2 play-in picks (local)
   const [playInResults, setPlayInResults] = useState(null); // admin-set actual play-in results
   const [showPlayIn,    setShowPlayIn]    = useState(false); // play-in modal visibility
-
-  // Whenever the admin updates results (including play-in) or the participant
-  // changes their play-in picks, re-run pick-cleaning so downstream slots stay
-  // consistent.  This handles cases where admin overwrites a play-in result and
-  // the user never touches the bracket again.
-  useEffect(() => {
-    if (!results) return;
-    // build flat results-as-picks for cleaning
-    const resultsAsPicks = {};
-    (Array.isArray(results?.rounds) ? results.rounds : Object.values(results?.rounds || {}))
-      .flatMap(r => Array.isArray(r.series) ? r.series : Object.values(r.series || {}))
-      .forEach(s => {
-        if (s?.id && s?.winner) resultsAsPicks[s.id] = { winner: s.winner, games: s.games };
-      });
-    const piSeeds1 = resolveEffectiveSeeds(playInPicks  || {}, playInResults);
-    const piSeeds2 = resolveEffectiveSeeds(playInPicks2 || {}, playInResults);
-    setMyPicks(prev => cleanDownstreamPicks(virtualSubstitutePicksForPlayIn(prev, piSeeds1), resultsAsPicks, piSeeds1));
-    setMyPicks2(prev => cleanDownstreamPicks(virtualSubstitutePicksForPlayIn(prev, piSeeds2), resultsAsPicks, piSeeds2));
-  }, [results, playInResults, playInPicks, playInPicks2]);
-
   const toastTimer = useRef(null);
 
   // ── Firebase listeners ──
@@ -1933,19 +1810,9 @@ export default function App() {
     const piSrc   = activeEntry === 1 ? playInPicks : playInPicks2;
     const piSeeds = resolveEffectiveSeeds(piSrc, playInResults);
     if (activeEntry === 1) {
-      setMyPicks(prev => {
-        // Substitute any stale play-in teams with confirmed winners before
-        // cleaning, so cleanDownstreamPicks replaces them rather than clearing them.
-        const next = { ...prev, [seriesId]: pick };
-        const substituted = piSeeds ? virtualSubstitutePicksForPlayIn(next, piSeeds) : next;
-        return cleanDownstreamPicks(substituted, {}, piSeeds);
-      });
+      setMyPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, {}, piSeeds));
     } else {
-      setMyPicks2(prev => {
-        const next = { ...prev, [seriesId]: pick };
-        const substituted = piSeeds ? virtualSubstitutePicksForPlayIn(next, piSeeds) : next;
-        return cleanDownstreamPicks(substituted, {}, piSeeds);
-      });
+      setMyPicks2(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, {}, piSeeds));
     }
   };
 
@@ -2242,16 +2109,9 @@ export default function App() {
   const myKey       = sanitize(myName);
   const flatParticipants = {};
   Object.entries(participants).forEach(([key, p]) => {
-    // Apply play-in substitutions so scoring reflects confirmed play-in winners
-    // even when stored picks still reference the displaced team (e.g. "LA Lakers"
-    // stored as W7 pick but actual W7 = "New Orleans Pelicans").
-    const piSeeds1 = resolveEffectiveSeeds(p.playInPicks  || {}, playInResults);
-    const piSeeds2 = resolveEffectiveSeeds(p.playInPicks2 || {}, playInResults);
-    const subPicks1 = virtualSubstitutePicksForPlayIn(p.picks  || {}, piSeeds1);
-    flatParticipants[key] = { ...p, picks: subPicks1 };
+    flatParticipants[key] = p;
     if (p.picks2 && Object.keys(p.picks2).length > 0) {
-      const subPicks2 = virtualSubstitutePicksForPlayIn(p.picks2, piSeeds2);
-      flatParticipants[key + '__2'] = { ...p, picks: subPicks2 };
+      flatParticipants[key + '__2'] = { ...p, picks: p.picks2 };
     }
   });
   const leaderboard = buildLeaderboard(flatParticipants, results);
@@ -2377,15 +2237,11 @@ export default function App() {
                 Once an entry is submitted, the pill shows the participant's display name. */}
             <div style={{marginBottom:20}}>
               <div className="entry-toggle">
-                <button className={`entry-btn ${activeEntry === 1 ? "active" : ""}`}
-                  onClick={() => setActiveEntry(1)}
-                  disabled={picksLocked && !submitted}>
+                <button className={`entry-btn ${activeEntry === 1 ? "active" : ""}`} onClick={() => setActiveEntry(1)}>
                   {submitted && myName.trim() ? myName.trim().slice(0,14) : "Entry 1"}
                   {submitted && <span className="entry-check">✓</span>}
                 </button>
-                <button className={`entry-btn ${activeEntry === 2 ? "active" : ""}`}
-                  onClick={() => setActiveEntry(2)}
-                  disabled={picksLocked && !submitted2}>
+                <button className={`entry-btn ${activeEntry === 2 ? "active" : ""}`} onClick={() => setActiveEntry(2)}>
                   {submitted2 && (myName2.trim() || myName.trim())
                     ? (myName2.trim() || myName.trim()).slice(0,14)
                     : "Entry 2"}
@@ -2631,15 +2487,11 @@ export default function App() {
                 <div style={{marginBottom:20}}>
                   <div className="xs muted" style={{marginBottom:8, letterSpacing:'1px'}}>Viewing picks for:</div>
                   <div className="entry-toggle">
-                    <button className={`entry-btn ${scenarioEntry === 1 ? "active" : ""}`}
-                      onClick={() => setScenarioEntry(1)}
-                      disabled={!submitted}>
+                    <button className={`entry-btn ${scenarioEntry === 1 ? "active" : ""}`} onClick={() => setScenarioEntry(1)}>
                       {submitted && myName.trim() ? myName.trim().slice(0,14) : "Entry 1"}
                       {submitted && <span className="entry-check">✓</span>}
                     </button>
-                    <button className={`entry-btn ${scenarioEntry === 2 ? "active" : ""}`}
-                      onClick={() => setScenarioEntry(2)}
-                      disabled={!submitted2}>
+                    <button className={`entry-btn ${scenarioEntry === 2 ? "active" : ""}`} onClick={() => setScenarioEntry(2)}>
                       {submitted2 && (myName2.trim() || myName.trim())
                         ? (myName2.trim() || myName.trim()).slice(0,14)
                         : "Entry 2"}
@@ -2811,7 +2663,7 @@ export default function App() {
                 {resolvedAdminRounds.map((round) => {
                 // Only show series where both teams are known real teams (resolved from admin results)
                 const resolvedSeries = round.series.filter(s =>
-                  seedFor(s.top, adminPlayInSeeds) !== "" && seedFor(s.bottom, adminPlayInSeeds) !== ""
+                  s.top in TEAM_SEEDS && s.bottom in TEAM_SEEDS
                 );
                 if (resolvedSeries.length === 0) return null;
 
