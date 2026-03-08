@@ -2,7 +2,7 @@
 // Static definition of all sports and their pools.
 // The `active` field here is the DEFAULT. The admin can override any pool's
 // active state in Firebase at /admin/poolSettings/{poolId}/active.
-// The `component` field names the React component to render (null = not built yet).
+// The `component` field names the React component to render (null = not built yet). 
 
 export const SPORTS = [
   {
