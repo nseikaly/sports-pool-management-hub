@@ -4,7 +4,6 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebas
 import { db, auth } from "./firebase";
 import { SPORTS, POOL_MAP } from "./poolRegistry";
 import NBAPlayoffPool from "./NBAPlayoffPool";
-import { migrateNBAData } from "./migrations";
 
 // ─── Shell CSS ────────────────────────────────────────────────────────────────
 
@@ -298,16 +297,6 @@ const shellCss = `
   }
   .hub-auth-btn:hover { background:var(--gold2); }
 
-  /* Admin hub tabs */
-  .admin-hub-tabs { display:flex; gap:4px; margin-bottom:28px; }
-  .admin-hub-tab {
-    padding:8px 18px; background:none; border:1px solid var(--border2);
-    border-radius:6px; color:var(--text3); font-size:0.72rem; font-weight:600;
-    letter-spacing:1px; cursor:pointer; transition:all 0.15s;
-  }
-  .admin-hub-tab.active { background:var(--gold); color:#111; border-color:transparent; }
-  .admin-hub-tab:hover:not(.active) { border-color:var(--gold); color:var(--gold); }
-
   /* Admin signed-in header bar */
   .admin-hub-bar {
     display:flex; align-items:center; justify-content:space-between;
@@ -381,26 +370,6 @@ const shellCss = `
   }
   .toggle-switch input:checked + .toggle-slider { background:rgba(34,197,94,0.2); border-color:var(--green); }
   .toggle-switch input:checked + .toggle-slider::before { transform:translateX(16px); background:var(--green); }
-
-  /* Migration panel */
-  .migrate-panel { background:var(--surface2); border:1px solid var(--border2); border-radius:10px; padding:24px; }
-  .migrate-title { font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:6px; }
-  .migrate-desc { font-size:0.75rem; color:var(--text2); line-height:1.6; margin-bottom:16px; }
-  .migrate-btn {
-    background:var(--surface3); border:1px solid var(--border2); color:var(--text);
-    border-radius:6px; padding:9px 20px; font-size:0.75rem; font-weight:700;
-    letter-spacing:1px; cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif;
-  }
-  .migrate-btn:hover:not(:disabled) { border-color:var(--gold); color:var(--gold); }
-  .migrate-btn:disabled { opacity:0.5; cursor:default; }
-  .migrate-log {
-    margin-top:16px; background:var(--bg); border:1px solid var(--border);
-    border-radius:6px; padding:12px 14px; font-family:'JetBrains Mono',monospace;
-    font-size:0.68rem; color:var(--text2); line-height:1.8;
-    max-height:240px; overflow-y:auto;
-  }
-  .migrate-log::-webkit-scrollbar { width:3px; }
-  .migrate-log::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
 
   /* ── Responsive ────────────────────────────────────────────────────────── */
   @media (max-width:900px) {
@@ -627,9 +596,7 @@ function GlobalAdminHub({
   poolSettings,
   onTogglePoolActive,
   onRenamePool,
-  migrateLog, migrating, onRunMigration,
 }) {
-  const [adminTab, setAdminTab]     = useState("pools");
   const [editingPool, setEditingPool] = useState(null);   // poolId being renamed
   const [editName, setEditName]       = useState("");
 
@@ -687,19 +654,8 @@ function GlobalAdminHub({
         <button className="admin-hub-signout" onClick={onAdminLogout}>Sign Out</button>
       </div>
 
-      {/* Tab nav */}
-      <div className="admin-hub-tabs">
-        <button className={`admin-hub-tab${adminTab === "pools" ? " active" : ""}`} onClick={() => setAdminTab("pools")}>
-          Pool Management
-        </button>
-        <button className={`admin-hub-tab${adminTab === "migrate" ? " active" : ""}`} onClick={() => setAdminTab("migrate")}>
-          Data Migration
-        </button>
-      </div>
-
-      {/* Pool Management tab */}
-      {adminTab === "pools" && (
-        <table className="pool-mgmt-table">
+      {/* Pool Management */}
+      <table className="pool-mgmt-table">
           <thead>
             <tr>
               <th>Sport</th>
@@ -766,31 +722,6 @@ function GlobalAdminHub({
             )}
           </tbody>
         </table>
-      )}
-
-      {/* Data Migration tab */}
-      {adminTab === "migrate" && (
-        <div className="migrate-panel">
-          <div className="migrate-title">Migrate NBA 2026 Data</div>
-          <div className="migrate-desc">
-            Copies data from the legacy flat Firebase paths (<code>/participants/</code>, <code>/results/</code>,{" "}
-            <code>/settings/</code>) to the new multi-pool structure (<code>/pools/nba-2026/...</code>).
-            Old data is <strong>not deleted</strong> — remove it manually from the Firebase console after verifying.
-          </div>
-          <button
-            className="migrate-btn"
-            disabled={migrating}
-            onClick={onRunMigration}
-          >
-            {migrating ? "⏳ Running Migration..." : "▶ Run NBA Data Migration"}
-          </button>
-          {migrateLog.length > 0 && (
-            <div className="migrate-log">
-              {migrateLog.map((line, i) => <div key={i}>{line}</div>)}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -806,8 +737,6 @@ export default function App() {
   const [adminLoginError, setAdminLoginError]   = useState("");
   const [showAdminPass, setShowAdminPass]       = useState(false);
   const [poolSettings, setPoolSettings]         = useState({});
-  const [migrateLog, setMigrateLog]             = useState([]);
-  const [migrating, setMigrating]               = useState(false);
 
   // ── Firebase listeners ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -861,18 +790,6 @@ export default function App() {
     await set(ref(db, `admin/poolSettings/${poolId}/customName`), newName.trim());
   }
 
-  async function handleRunMigration() {
-    setMigrateLog([]);
-    setMigrating(true);
-    const result = await migrateNBAData(msg => {
-      setMigrateLog(prev => [...prev, msg]);
-    });
-    if (!result.success) {
-      setMigrateLog(prev => [...prev, `❌ ${result.message}`]);
-    }
-    setMigrating(false);
-  }
-
   function getEffectiveActive(pool) {
     return poolSettings[pool.id]?.active ?? pool.active;
   }
@@ -906,9 +823,6 @@ export default function App() {
           poolSettings={poolSettings}
           onTogglePoolActive={handleTogglePoolActive}
           onRenamePool={handleRenamePool}
-          migrateLog={migrateLog}
-          migrating={migrating}
-          onRunMigration={handleRunMigration}
         />
       );
     }
