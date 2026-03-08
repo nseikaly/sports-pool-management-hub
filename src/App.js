@@ -1121,6 +1121,28 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
 
   // ── Eliminated teams (computed once for this bracket render) ─────────────
   const eliminatedTeams = getEliminatedTeams(results);
+  // Patch: getEliminatedTeams derives R1 losers from BRACKET_CONFIG team names,
+  // but when play-in results are known the actual team filling a #7/#8 slot may
+  // differ from the config placeholder (e.g. Sacramento Kings instead of New
+  // Orleans Pelicans in the W8 slot).  Fix up the set so that:
+  //  • the config placeholder (never actually in that slot) is removed, and
+  //  • the real play-in team is added if they lost their R1 series.
+  if (playInSeeds) {
+    Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
+      const actualTeam  = playInSeeds[seedKey];
+      if (!actualTeam) return;
+      const r1Config    = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
+      if (!r1Config) return;
+      const configBottom = r1Config.bottom;
+      if (actualTeam === configBottom) return; // same team — no patch needed
+      const rs = getAdminResultForSeries(results, sid);
+      if (!rs?.winner) return; // R1 not yet settled, nothing was added
+      eliminatedTeams.delete(configBottom);          // remove false placeholder entry
+      if (rs.winner !== actualTeam) {
+        eliminatedTeams.add(actualTeam);             // actual loser → mark eliminated
+      }
+    });
+  }
 
   // ── Card renderer ─────────────────────────────────────────────────────────
   function renderCard(sid, topPx, col) {
