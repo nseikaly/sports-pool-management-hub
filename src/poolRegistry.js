@@ -70,7 +70,7 @@ export const SPORTS = [
   {
     id: "ncaaf",
     name: "NCAAF",
-    icon: "🏆",
+    icon: "🏈",
     color: "#8B0000",
     pools: [
       { id: "ncaaf-2025", name: "2025-26 CFP", active: false, component: null },
