@@ -1,4 +1,4 @@
-import { BRACKET_CONFIG } from "./bracketConfig";
+import { BRACKET_CONFIG, PLAY_IN_SLOTS } from "./bracketConfig";
 
 // ─── Bracket feed map ─────────────────────────────────────────────────────────
 // Maps each later-round series to the two earlier-round series whose winners feed into it.
@@ -12,6 +12,11 @@ const FEEDS_FROM = {
   s14: { top: "s11", bottom: "s12" },   // West Finals
   s15: { top: "s13", bottom: "s14" },   // NBA Finals
 };
+
+// Reverse of PLAY_IN_SLOTS: maps series ID → seedKey (e.g. "s1" → "E8")
+// Used to look up which actual play-in team occupies each R1 play-in slot.
+const PI_SERIES_TO_SEED = {};
+Object.entries(PLAY_IN_SLOTS).forEach(([key, sid]) => { PI_SERIES_TO_SEED[sid] = key; });
 
 // Get a flat list of all series from results object
 export function allSeries(results) {
@@ -43,19 +48,25 @@ function buildResultWinners(results) {
 }
 
 // Get the set of all teams that have been eliminated based on current results.
-// R1 losers are identified via BRACKET_CONFIG team names.
-// Later-round losers are identified via FEEDS_FROM + known R1/later winners.
-export function getEliminatedTeams(results) {
+// Pass playInSeeds ({ E7, E8, W7, W8 }) so that the actual play-in team filling
+// each #7/#8 slot is used instead of the BRACKET_CONFIG placeholder name.
+// This ensures teams like Sacramento Kings (seed 10 that won the play-in) are
+// correctly marked eliminated when they lose R1, rather than the placeholder.
+export function getEliminatedTeams(results, playInSeeds = null) {
   const eliminated = new Set();
   if (!results) return eliminated;
 
   const resultWinners = buildResultWinners(results);
 
-  // R1: team names are fixed in BRACKET_CONFIG — find losers directly
+  // R1: for play-in slots use the actual team if known; otherwise use BRACKET_CONFIG name.
   BRACKET_CONFIG.rounds[0].series.forEach(s => {
     const winner = resultWinners[s.id];
     if (winner) {
-      const loser = winner === s.top ? s.bottom : s.top;
+      const seedKey     = PI_SERIES_TO_SEED[s.id]; // e.g. "E8" for s1
+      const actualBottom = (playInSeeds && seedKey)
+        ? (playInSeeds[seedKey] || s.bottom)
+        : s.bottom;
+      const loser = winner === s.top ? actualBottom : s.top;
       if (loser) eliminated.add(loser);
     }
   });
@@ -74,6 +85,23 @@ export function getEliminatedTeams(results) {
   });
 
   return eliminated;
+}
+
+// Build a substitution map for picks that were stored using BRACKET_CONFIG placeholder
+// names before admin set play-in results (e.g. "Miami Heat" stored instead of
+// "Detroit Pistons" for the E8 slot).  Maps configBottom → actualPlayInTeam.
+// Used by maxPossible and auto-fill to correctly identify eliminated picks.
+function buildPicksSubMap(playInSeeds) {
+  const subMap = {};
+  if (!playInSeeds) return subMap;
+  Object.entries(PI_SERIES_TO_SEED).forEach(([sid, seedKey]) => {
+    const actualTeam = playInSeeds[seedKey];
+    if (!actualTeam) return;
+    const r1Series = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
+    if (!r1Series || actualTeam === r1Series.bottom) return;
+    subMap[r1Series.bottom] = actualTeam; // old placeholder name → real play-in team
+  });
+  return subMap;
 }
 
 // Calculate earned points for a set of picks against known results
@@ -99,10 +127,16 @@ export function calcPoints(picks, results) {
 
 // Calculate max points still achievable.
 // Excludes future series where the picked team has already been eliminated.
-export function maxPossible(picks, results) {
+// Pass playInSeeds so that actual play-in teams (seed 9/10) are recognised as
+// eliminated and picks stored under old placeholder names are handled correctly.
+export function maxPossible(picks, results, playInSeeds = null) {
   if (!picks) return 0;
 
-  const eliminatedTeams = getEliminatedTeams(results);
+  const eliminatedTeams = getEliminatedTeams(results, playInSeeds);
+  // Substitution map handles picks stored with BRACKET_CONFIG placeholder names
+  // (e.g. picks made before admin set play-in results).
+  const picksSubMap = buildPicksSubMap(playInSeeds);
+
   let potential = 0;
 
   // Loop through ALL series in the bracket (not just ones with results)
@@ -111,15 +145,18 @@ export function maxPossible(picks, results) {
       const pick = picks[series.id];
       if (!pick?.winner) return; // No pick = no potential
 
+      // Resolve effective winner: apply substitution for old placeholder names
+      const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
+
       // Find if this series has a result
       const resultSeries = allSeries(results).find(s => s.id === series.id);
 
       if (!resultSeries?.winner) {
         // Series not done yet — only count if team is still alive
-        if (!eliminatedTeams.has(pick.winner)) {
+        if (!eliminatedTeams.has(effectiveWinner)) {
           potential += round.winnerPoints + round.gamesPoints;
         }
-      } else if (pick.winner === resultSeries.winner) {
+      } else if (effectiveWinner === resultSeries.winner) {
         // Correct winner — count earned points
         potential += round.winnerPoints;
         if (pick.games === resultSeries.games) {
@@ -149,13 +186,15 @@ export function countCorrectGames(picks, results) {
   ).length;
 }
 
-// Build the leaderboard from a participants map
-export function buildLeaderboard(participants, results) {
+// Build the leaderboard from a participants map.
+// Pass playInSeeds (admin-confirmed) so maxPossible correctly excludes
+// eliminated play-in teams (seed 9/10 that won their way into the bracket).
+export function buildLeaderboard(participants, results, playInSeeds = null) {
   return Object.entries(participants || {})
     .map(([id, p]) => ({
       id, ...p,
       points:       calcPoints(p.picks, results),
-      maxPts:       maxPossible(p.picks, results),
+      maxPts:       maxPossible(p.picks, results, playInSeeds),
       correct:      countCorrect(p.picks, results),
       correctGames: countCorrectGames(p.picks, results),
     }))
