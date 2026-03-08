@@ -186,12 +186,16 @@ const css = `
   /* Play-In TBD slot inside bracket matchup card */
   .bm-team-pi-tbd { justify-content:center; gap:4px; min-height:42px;
     border-style:dashed !important; border-color:rgba(201,168,76,0.3) !important;
-    background:rgba(201,168,76,0.04) !important; cursor:pointer !important; }
-  .bm-team-pi-tbd:hover { border-color:rgba(201,168,76,0.65) !important;
-    background:rgba(201,168,76,0.1) !important; }
+    background:rgba(201,168,76,0.04) !important; cursor:default; }
+  .bm-team-pi-tbd:not(:disabled) { cursor:pointer; }
+  .bm-team-pi-tbd:not(:disabled):hover { border-color:rgba(201,168,76,0.75) !important;
+    background:rgba(201,168,76,0.12) !important; box-shadow:0 0 8px rgba(201,168,76,0.15) !important; }
   .bm-team-pi-tbd-text { font-size:0.6rem; color:var(--gold); letter-spacing:0.8px;
     font-weight:700; opacity:0.7; }
-  .bm-team-pi-tbd:hover .bm-team-pi-tbd-text { opacity:1; }
+  .bm-team-pi-tbd:not(:disabled):hover .bm-team-pi-tbd-text { opacity:1; }
+  .bm-team-pi-tbd-hint { font-size:0.52rem; color:var(--gold); opacity:0; letter-spacing:0.5px;
+    font-family:'DM Sans',sans-serif; transition:opacity 0.15s; margin-top:1px; }
+  .bm-team-pi-tbd:not(:disabled):hover .bm-team-pi-tbd-hint { opacity:0.6; }
 
   /* Tabs */
   .tabs { display:flex; border-bottom:1px solid var(--border); margin:20px 0 28px; }
@@ -226,6 +230,22 @@ const css = `
     font-family:'Bebas Neue',sans-serif; cursor:pointer;
     transition:all 0.15s; white-space:nowrap; }
   .entry-add-btn:hover { background:rgba(201,168,76,0.08); border-color:var(--gold); border-style:solid; }
+
+  /* Entry 2 "in-progress" indicator pill — shown when editing Entry 2 before submitting */
+  .entry-btn-draft {
+    display:inline-flex; align-items:center; gap:8px;
+    background:rgba(201,168,76,0.06); border:1.5px dashed rgba(201,168,76,0.4);
+    color:var(--gold); border-radius:8px; padding:10px 16px;
+    font-size:0.76rem; font-weight:700; letter-spacing:1px;
+    font-family:'Bebas Neue',sans-serif; white-space:nowrap;
+    animation:entry-draft-pulse 2.5s ease-in-out infinite; }
+  @keyframes entry-draft-pulse {
+    0%,100% { border-color:rgba(201,168,76,0.4); box-shadow:none; }
+    50%      { border-color:rgba(201,168,76,0.75); box-shadow:0 0 8px rgba(201,168,76,0.18); } }
+  .entry-draft-badge {
+    background:rgba(201,168,76,0.15); color:var(--gold2);
+    font-size:0.55rem; letter-spacing:1.2px; border-radius:4px;
+    padding:2px 6px; font-family:'DM Sans',sans-serif; font-weight:700; }
 
   /* ── Submission Success Overlay ──────────────────────────────────────── */
   .sub-success-modal {
@@ -891,7 +911,7 @@ function shortTeamName(fullName) {
 
 // ─── Bracket Matchup (compact card for bracket view) ─────────────────────
 
-function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost }) {
+function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost, onPlayInTBDClick }) {
   const pick   = picks?.[series.id] || {};
   const result = getAdminResultForSeries(results, series.id);
   const settled = result?.winner != null;
@@ -995,9 +1015,15 @@ function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFin
           {bottomSeed != null && <span className="bm-seed">#{bottomSeed}</span>}
         </button>
       ) : series.bottom === "Play-In TBD" ? (
-        <button className="bm-team bm-team-pi-tbd" disabled aria-label="Play-In TBD — make Play-In picks first">
+        <button
+          className="bm-team bm-team-pi-tbd"
+          disabled={readOnly || !onPlayInTBDClick}
+          onClick={onPlayInTBDClick}
+          aria-label={onPlayInTBDClick ? "Click to make Play-In picks" : "Play-In TBD — make Play-In picks first"}
+        >
           <span style={{fontSize:'0.75rem'}}>🏀</span>
           <span className="bm-team-pi-tbd-text">PLAY-IN TBD</span>
+          {onPlayInTBDClick && <span className="bm-team-pi-tbd-hint">tap to pick</span>}
         </button>
       ) : (
         <button className="bm-team bm-team-tbd" disabled aria-label="TBD — pick upstream matchup first" />
@@ -1111,7 +1137,7 @@ function virtualSubstitutePicksForPlayIn(picks, playInSeeds) {
   return result;
 }
 
-function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksForScenario, onScenarioPick, playInSeeds }) {
+function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksForScenario, onScenarioPick, playInSeeds, onPlayInTBDClick }) {
   // Measure the container width so cards stretch to fill it
   const containerRef = useRef(null);
   const [containerW, setContainerW] = useState(900);
@@ -1263,6 +1289,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
           onPick={onPick} readOnly={readOnly} results={results}
           isFinals={sid === "s15"}
           eliminatedTeams={eliminatedTeams}
+          onPlayInTBDClick={onPlayInTBDClick}
         />
       </div>
     );
@@ -2407,8 +2434,9 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  // Only Entry 1 submitted: standalone pill + optional "Add Entry 2" button
+                  // Only Entry 1 submitted: standalone pill + context-aware second slot
                   <div className="entry-toggle-row">
+                    {/* Entry 1 pill — always shown; click navigates back when on Entry 2 */}
                     <button
                       className={`entry-btn entry-btn-pill ${activeEntry === 1 ? "active" : ""}`}
                       onClick={() => setActiveEntry(1)}
@@ -2416,11 +2444,19 @@ export default function App() {
                       {myName.trim().slice(0,14) || "Entry 1"}
                       <span className="entry-check">✓</span>
                     </button>
-                    {activeEntry === 1 && !picksLocked && (
+
+                    {activeEntry === 1 && !picksLocked ? (
+                      // On Entry 1 view: show "+ Add Entry 2" prompt
                       <button className="entry-add-btn" onClick={() => setActiveEntry(2)}>
                         ＋ Add Entry 2
                       </button>
-                    )}
+                    ) : activeEntry === 2 ? (
+                      // On Entry 2 view (not yet submitted): show "in progress" pill
+                      <span className="entry-btn-draft">
+                        Entry 2
+                        <span className="entry-draft-badge">✎ IN PROGRESS</span>
+                      </span>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -2474,7 +2510,7 @@ export default function App() {
             })()}
 
             <div className="bracket-print-wrapper">
-              <BracketView picks={activePicks} onPick={handlePick} readOnly={picksLocked} results={results} playInSeeds={activePlayInSeeds} />
+              <BracketView picks={activePicks} onPick={handlePick} readOnly={picksLocked} results={results} playInSeeds={activePlayInSeeds} onPlayInTBDClick={picksLocked ? undefined : () => setShowPlayIn(true)} />
             </div>
 
             {/* Submit */}
