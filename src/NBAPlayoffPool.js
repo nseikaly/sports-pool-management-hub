@@ -1916,7 +1916,7 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubPlayIn(); unsubMe(); unsubMe2(); unsubPIP(); unsubPIP2(); };
     }
 
-    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubPlayIn(); unsubAuth(); };
+    return () => { unsubResults(); unsubParticipants(); unsubLock(); unsubDeadline(); unsubPlayIn(); };
   }, []);
 
   const showToast = (msg) => {
