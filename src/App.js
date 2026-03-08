@@ -92,12 +92,12 @@ const shellCss = `
     white-space:nowrap; overflow:hidden;
     opacity:1; transition:opacity 0.15s;
   }
-  .sb-collapsed .sb-sport-name { opacity:0; }
+  .sb-collapsed .sb-sport-name { opacity:0; width:0; flex:none; overflow:hidden; }
   .sb-sport-chevron {
     font-size:0.55rem; color:var(--text3);
     transition:transform 0.2s, opacity 0.15s; flex-shrink:0;
   }
-  .sb-collapsed .sb-sport-chevron { opacity:0; }
+  .sb-collapsed .sb-sport-chevron { opacity:0; width:0; overflow:hidden; }
   .sb-sport-hdr.open .sb-sport-chevron { transform:rotate(180deg); }
 
   /* Pool item */
@@ -113,6 +113,7 @@ const shellCss = `
     border-left-color:var(--gold);
     background:rgba(201,168,76,0.06);
   }
+  .sb-pool-item.inactive { cursor:default; opacity:0.45; pointer-events:none; }
   .sb-pool-name {
     flex:1; font-size:0.74rem; font-weight:600; color:var(--text2);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -167,7 +168,7 @@ const shellCss = `
   .sb-admin-icon { font-size:1rem; width:28px; height:28px; flex-shrink:0;
     display:flex; align-items:center; justify-content:center; }
   .sb-admin-label { opacity:1; transition:opacity 0.15s; white-space:nowrap; }
-  .sb-collapsed .sb-admin-label { opacity:0; }
+  .sb-collapsed .sb-admin-label { opacity:0; width:0; overflow:hidden; }
   .sb-collapsed .sb-admin-item { padding:0; justify-content:center; height:44px; }
 
   /* ── Pool Hub Home ─────────────────────────────────────────────────────── */
@@ -335,6 +336,30 @@ const shellCss = `
     background:var(--surface3); border-radius:6px; }
   .pmt-sport-name { font-size:0.72rem; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:1px; }
   .pmt-pool-name { font-size:0.8rem; color:var(--text); font-weight:600; }
+  .pmt-pool-row { display:flex; align-items:center; gap:8px; }
+  .pmt-rename-input {
+    background:var(--surface3); border:1px solid var(--gold); border-radius:5px;
+    padding:5px 9px; color:var(--text); font-size:0.8rem; font-weight:600;
+    font-family:'DM Sans',sans-serif; outline:none; width:180px;
+  }
+  .pmt-edit-btn {
+    background:none; border:1px solid var(--border2); color:var(--text3);
+    border-radius:5px; padding:4px 9px; font-size:0.65rem; letter-spacing:0.5px;
+    cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif; white-space:nowrap;
+  }
+  .pmt-edit-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .pmt-save-btn {
+    background:var(--gold); border:none; color:#111;
+    border-radius:5px; padding:4px 9px; font-size:0.65rem; font-weight:700;
+    cursor:pointer; transition:background 0.15s; font-family:'DM Sans',sans-serif; white-space:nowrap;
+  }
+  .pmt-save-btn:hover { background:var(--gold2); }
+  .pmt-cancel-btn {
+    background:none; border:1px solid var(--border2); color:var(--text3);
+    border-radius:5px; padding:4px 9px; font-size:0.65rem;
+    cursor:pointer; transition:all 0.15s; font-family:'DM Sans',sans-serif; white-space:nowrap;
+  }
+  .pmt-cancel-btn:hover { border-color:var(--red); color:var(--red); }
   .pmt-status-chip {
     display:inline-flex; align-items:center; gap:4px;
     font-size:0.58rem; letter-spacing:1.5px; text-transform:uppercase; font-weight:700;
@@ -381,7 +406,7 @@ const shellCss = `
   @media (max-width:900px) {
     .shell-sidebar { width:56px; min-width:56px; }
     .sb-logo-text, .sb-sport-name, .sb-sport-chevron,
-    .sb-pool-name, .sb-pool-dot, .sb-inactive-chip, .sb-admin-label { opacity:0; pointer-events:none; }
+    .sb-pool-name, .sb-pool-dot, .sb-inactive-chip, .sb-admin-label { opacity:0; width:0; flex:none; overflow:hidden; pointer-events:none; }
     .sb-sport-hdr { padding:0; justify-content:center; height:44px; }
     .sb-collapse-btn { display:none; }
     .sb-pool-item { display:none; }
@@ -450,17 +475,18 @@ function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed,
               {(isExpanded || collapsed) && (
                 <div className="sb-pool-list">
                   {sport.pools.map(pool => {
-                    const isActive = getEffectiveActive(pool);
-                    const isSelected = selectedPool === pool.id;
+                    const isActive    = getEffectiveActive(pool);
+                    const isSelected  = selectedPool === pool.id;
+                    const displayName = poolSettings[pool.id]?.customName || pool.name;
                     return (
                       <div
                         key={pool.id}
                         className={`sb-pool-item${isSelected ? " active" : ""}${!isActive ? " inactive" : ""}`}
-                        onClick={() => onSelectPool(pool.id)}
-                        title={collapsed ? `${sport.name}: ${pool.name}` : undefined}
+                        onClick={isActive ? () => onSelectPool(pool.id) : undefined}
+                        title={collapsed ? (isActive ? `${sport.name}: ${displayName}` : `${sport.name}: ${displayName} (Not Active)`) : undefined}
                       >
                         {isActive && <span className="sb-pool-dot" />}
-                        <span className="sb-pool-name">{pool.name}</span>
+                        <span className="sb-pool-name">{displayName}</span>
                         {!isActive && <span className="sb-inactive-chip">Not Active</span>}
                       </div>
                     );
@@ -513,7 +539,9 @@ function PoolHubHome({ onSelectPool, poolSettings }) {
         <div style={{ marginBottom: 44 }}>
           <div className="hub-section-label">Active Pools</div>
           <div className="hub-active-grid">
-            {activePools.map(({ pool, sport }) => (
+            {activePools.map(({ pool, sport }) => {
+              const displayName = poolSettings[pool.id]?.customName || pool.name;
+              return (
               <div
                 key={pool.id}
                 className="hub-active-card"
@@ -521,13 +549,13 @@ function PoolHubHome({ onSelectPool, poolSettings }) {
               >
                 <div className="hub-ac-icon">{sport.icon}</div>
                 <div className="hub-ac-sport">{sport.name}</div>
-                <div className="hub-ac-name">{pool.name}</div>
+                <div className="hub-ac-name">{displayName}</div>
                 <span className="hub-ac-badge">
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--green)", display: "inline-block" }} />
                   Active
                 </span>
               </div>
-            ))}
+            ); })}
           </div>
         </div>
       )}
@@ -598,9 +626,12 @@ function GlobalAdminHub({
   onAdminLogin, onAdminLogout,
   poolSettings,
   onTogglePoolActive,
+  onRenamePool,
   migrateLog, migrating, onRunMigration,
 }) {
-  const [adminTab, setAdminTab] = useState("pools");
+  const [adminTab, setAdminTab]     = useState("pools");
+  const [editingPool, setEditingPool] = useState(null);   // poolId being renamed
+  const [editName, setEditName]       = useState("");
 
   if (!adminAuthed) {
     return (
@@ -672,7 +703,7 @@ function GlobalAdminHub({
           <thead>
             <tr>
               <th>Sport</th>
-              <th>Pool</th>
+              <th>Pool Name</th>
               <th>Status</th>
               <th>Active</th>
             </tr>
@@ -680,7 +711,9 @@ function GlobalAdminHub({
           <tbody>
             {SPORTS.flatMap(sport =>
               sport.pools.map(pool => {
-                const isActive = poolSettings[pool.id]?.active ?? pool.active;
+                const isActive    = poolSettings[pool.id]?.active ?? pool.active;
+                const displayName = poolSettings[pool.id]?.customName || pool.name;
+                const isEditing   = editingPool === pool.id;
                 return (
                   <tr key={pool.id}>
                     <td>
@@ -689,7 +722,29 @@ function GlobalAdminHub({
                         <span className="pmt-sport-name">{sport.name}</span>
                       </div>
                     </td>
-                    <td><span className="pmt-pool-name">{pool.name}</span></td>
+                    <td>
+                      {isEditing ? (
+                        <div className="pmt-pool-row">
+                          <input
+                            className="pmt-rename-input"
+                            value={editName}
+                            onChange={e => setEditName(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") { onRenamePool(pool.id, editName); setEditingPool(null); }
+                              if (e.key === "Escape") setEditingPool(null);
+                            }}
+                            autoFocus
+                          />
+                          <button className="pmt-save-btn" onClick={() => { onRenamePool(pool.id, editName); setEditingPool(null); }}>Save</button>
+                          <button className="pmt-cancel-btn" onClick={() => setEditingPool(null)}>✕</button>
+                        </div>
+                      ) : (
+                        <div className="pmt-pool-row">
+                          <span className="pmt-pool-name">{displayName}</span>
+                          <button className="pmt-edit-btn" onClick={() => { setEditingPool(pool.id); setEditName(displayName); }}>✎ Rename</button>
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <span className={`pmt-status-chip ${isActive ? "active" : "inactive"}`}>
                         {isActive ? "● Active" : "○ Inactive"}
@@ -801,6 +856,11 @@ export default function App() {
     await set(ref(db, `admin/poolSettings/${poolId}/active`), value);
   }
 
+  async function handleRenamePool(poolId, newName) {
+    if (!db || !newName.trim()) return;
+    await set(ref(db, `admin/poolSettings/${poolId}/customName`), newName.trim());
+  }
+
   async function handleRunMigration() {
     setMigrateLog([]);
     setMigrating(true);
@@ -845,6 +905,7 @@ export default function App() {
           onAdminLogout={handleAdminLogout}
           poolSettings={poolSettings}
           onTogglePoolActive={handleTogglePoolActive}
+          onRenamePool={handleRenamePool}
           migrateLog={migrateLog}
           migrating={migrating}
           onRunMigration={handleRunMigration}
