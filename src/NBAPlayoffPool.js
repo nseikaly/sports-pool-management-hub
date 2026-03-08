@@ -223,6 +223,19 @@ const css = `
     transition:all 0.15s; white-space:nowrap; }
   .entry-add-btn:hover { background:rgba(201,168,76,0.08); border-color:var(--gold); border-style:solid; }
 
+  /* ── Find My Picks ──────────────────────────────────────────────────────── */
+  .find-picks-wrap { max-width:640px; margin-bottom:14px; }
+  .find-picks-prompt { font-size:0.78rem; color:var(--text3); }
+  .find-picks-link { background:none; border:none; color:var(--gold); font-size:0.78rem;
+    cursor:pointer; padding:0; text-decoration:underline; font-family:inherit; }
+  .find-picks-link:hover { color:var(--text); }
+  .find-picks-form { margin-top:10px; background:var(--surface2); border:1px solid var(--border2);
+    border-radius:6px; padding:14px; display:flex; flex-direction:column; gap:0; }
+  .find-picks-row { display:flex; gap:10px; align-items:flex-end; }
+  .find-picks-row .fi { margin-bottom:0; }
+  .find-picks-msg { font-size:0.75rem; margin-top:8px; line-height:1.45; }
+  .find-picks-err { color:var(--red); }
+
   /* Entry 2 "in-progress" indicator pill — shown when editing Entry 2 before submitting */
   .entry-btn-draft {
     display:inline-flex; align-items:center; gap:8px;
@@ -1822,6 +1835,10 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
   const [myEmail2,  setMyEmail2]  = useState(() => localStorage.getItem(`${poolId}_pool_email_2`) || localStorage.getItem("pool_email_2") || "");
   const [submitted, setSubmitted] = useState(() => localStorage.getItem(`${poolId}_pool_submitted`) === "1" || localStorage.getItem("pool_submitted") === "1");
   const [submitted2, setSubmitted2] = useState(() => localStorage.getItem(`${poolId}_pool_submitted_2`) === "1" || localStorage.getItem("pool_submitted_2") === "1");
+  const [findEmail,    setFindEmail]    = useState("");
+  const [findName,     setFindName]     = useState("");
+  const [findStatus,   setFindStatus]   = useState(""); // "" | "found" | "notfound" | "invalid"
+  const [showFindForm, setShowFindForm] = useState(false);
   const [toast,       setToast]       = useState("");
   const [loading,     setLoading]     = useState(true);
   const [saving,      setSaving]      = useState(false);
@@ -2073,6 +2090,45 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
     }
     setSaving(false);
   };
+
+  // ── Find My Picks — name + email lookup (multi-device support) ──
+  function handleFindPicks() {
+    const email = findEmail.trim().toLowerCase();
+    const nameKey = sanitize(findName.trim());
+    if (!email || !findName.trim()) return;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) { setFindStatus("invalid"); return; }
+    // Require BOTH name and email to match — prevents someone from hijacking an
+    // entry using only a known email address.
+    const match = Object.entries(participants).find(([key, p]) =>
+      key === nameKey &&
+      ((p.email  || "").toLowerCase() === email ||
+       (p.email2 || "").toLowerCase() === email)
+    );
+    if (match) {
+      const [, p] = match;
+      setMyName(p.name || "");
+      setMyEmail(p.email || "");
+      if (p.picks)        setMyPicks(p.picks);
+      if (p.picks2)       setMyPicks2(p.picks2);
+      if (p.playInPicks)  setPlayInPicks(p.playInPicks);
+      if (p.playInPicks2) setPlayInPicks2(p.playInPicks2);
+      localStorage.setItem(`${poolId}_pool_name`,      p.name || "");
+      localStorage.setItem(`${poolId}_pool_submitted`, "1");
+      setSubmitted(true);
+      if (p.submittedAt2) {
+        setSubmitted2(true);
+        localStorage.setItem(`${poolId}_pool_submitted_2`, "1");
+        if (p.name2)  { setMyName2(p.name2);  localStorage.setItem(`${poolId}_pool_name_2`,  p.name2); }
+        if (p.email2) { setMyEmail2(p.email2); localStorage.setItem(`${poolId}_pool_email_2`, p.email2); }
+      }
+      setFindStatus("found");
+      setShowFindForm(false);
+      showToast(`✓ Found your picks — welcome back, ${p.name || ""}!`);
+    } else {
+      setFindStatus("notfound");
+    }
+  }
 
   // ── Admin: Firebase Auth login / logout ──
 ;
@@ -2474,8 +2530,55 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
               <BracketView picks={activePicks} onPick={handlePick} readOnly={picksLocked} results={results} playInSeeds={activePlayInSeeds} onPlayInTBDClick={picksLocked ? undefined : () => setShowPlayIn(true)} />
             </div>
 
+            {/* Find My Picks — helps users on a new device recover their existing entry */}
+            {!submitted && (
+              <div className="find-picks-wrap" style={{marginTop:30}}>
+                <div className="find-picks-prompt">
+                  Already submitted on another device?{" "}
+                  <button className="find-picks-link"
+                    onClick={() => { setShowFindForm(f => !f); setFindStatus(""); }}>
+                    Find my picks by email {showFindForm ? "↑" : "↓"}
+                  </button>
+                </div>
+                {showFindForm && (
+                  <div className="find-picks-form">
+                    <div className="find-picks-row">
+                      <div style={{flex:1}}>
+                        <label className="fl">Your name</label>
+                        <input className="fi" placeholder="e.g. Mike Jordan" maxLength={16}
+                          value={findName}
+                          onChange={e => { setFindName(e.target.value); setFindStatus(""); }}
+                          onKeyDown={e => e.key === "Enter" && handleFindPicks()} />
+                      </div>
+                      <div style={{flex:1}}>
+                        <label className="fl">Your email address</label>
+                        <input className="fi" type="email" placeholder="you@email.com"
+                          value={findEmail}
+                          onChange={e => { setFindEmail(e.target.value); setFindStatus(""); }}
+                          onKeyDown={e => e.key === "Enter" && handleFindPicks()} />
+                      </div>
+                      <button className="btn btn-gold" style={{flexShrink:0, marginBottom:1}}
+                        onClick={handleFindPicks} disabled={!findEmail.trim() || !findName.trim()}>
+                        Find Picks
+                      </button>
+                    </div>
+                    {findStatus === "notfound" && (
+                      <div className="find-picks-msg find-picks-err">
+                        ⚠ No entry found matching that name and email. Make sure both match exactly what you entered when you submitted.
+                      </div>
+                    )}
+                    {findStatus === "invalid" && (
+                      <div className="find-picks-msg find-picks-err">
+                        ⚠ Please enter a valid email address (e.g. you@email.com).
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Submit */}
-            <div className="sec" style={{marginTop:30}}>Submit Entry {activeEntry}</div>
+            <div className="sec" style={{marginTop: submitted ? 30 : 14}}>Submit Entry {activeEntry}</div>
             <div className="form">
               <div className="g2">
                 <div>
@@ -2485,7 +2588,8 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
                   <input className="fi" placeholder="e.g. Mike Jordan" maxLength={16}
                     value={activeEntry === 1 ? myName : myName2}
                     onChange={e => activeEntry === 1 ? setMyName(e.target.value) : setMyName2(e.target.value)}
-                    disabled={(activeEntry === 1 ? submitted : false) || picksLocked} />
+                    disabled={(activeEntry === 1 ? submitted : false) || picksLocked}
+                    title={activeEntry === 1 && !submitted ? "Use the same name you used when you first submitted" : undefined} />
                 </div>
                 <div>
                   <label className="fl">
