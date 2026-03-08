@@ -320,6 +320,16 @@ const shellCss = `
   .pool-mgmt-table td {
     padding:12px 12px; border-bottom:1px solid var(--border); vertical-align:middle;
   }
+  /* Drag handle */
+  .pmt-drag-handle {
+    color:var(--text3); font-size:1rem; cursor:grab; user-select:none;
+    padding:0 6px; line-height:1; transition:color 0.15s;
+  }
+  .pmt-drag-handle:active { cursor:grabbing; }
+  .pmt-drag-handle:hover { color:var(--gold); }
+  .pool-row-dragging { opacity:0.35; }
+  .pool-row-drag-over td { border-top:2px solid var(--gold) !important; }
+
   .pmt-sport-cell { display:flex; align-items:center; gap:8px; }
   .pmt-sport-icon { font-size:1.1rem; width:28px; height:28px; display:flex; align-items:center; justify-content:center;
     background:var(--surface3); border-radius:6px; }
@@ -391,9 +401,9 @@ const shellCss = `
 
 // ─── Sidebar Component ────────────────────────────────────────────────────────
 
-function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed, poolSettings }) {
+function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed, poolSettings, sports }) {
   const [expandedSports, setExpandedSports] = useState(() =>
-    Object.fromEntries(SPORTS.map(s => [s.id, true]))
+    Object.fromEntries(sports.map(s => [s.id, true]))
   );
 
   function toggleSport(sportId) {
@@ -423,7 +433,7 @@ function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed,
 
       {/* Sport sections */}
       <div className="sb-scroll">
-        {SPORTS.map(sport => {
+        {sports.map(sport => {
           const isExpanded = expandedSports[sport.id];
           const hasActive = sportHasActive(sport);
           return (
@@ -484,12 +494,12 @@ function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed,
 
 // ─── Pool Hub Home ────────────────────────────────────────────────────────────
 
-function PoolHubHome({ onSelectPool, poolSettings }) {
+function PoolHubHome({ onSelectPool, poolSettings, sports }) {
   function getEffectiveActive(pool) {
     return poolSettings[pool.id]?.active ?? pool.active;
   }
 
-  const activePools = SPORTS.flatMap(sport =>
+  const activePools = sports.flatMap(sport =>
     sport.pools
       .filter(pool => getEffectiveActive(pool))
       .map(pool => ({ pool, sport }))
@@ -499,7 +509,7 @@ function PoolHubHome({ onSelectPool, poolSettings }) {
     <div className="hub-home">
       {/* Hero */}
       <div className="hub-hero">
-        <div className="hub-hero-title">SPORTS <span>POOL</span> HUB</div>
+        <div className="hub-hero-title"><span>SEIKALY SPORTS</span> POOL HUB</div>
         <div className="hub-hero-sub">Your pools. All in one place.</div>
       </div>
 
@@ -533,7 +543,7 @@ function PoolHubHome({ onSelectPool, poolSettings }) {
       <div>
         <div className="hub-section-label">All Sports</div>
         <div className="hub-sports-grid">
-          {SPORTS.map(sport => {
+          {sports.map(sport => {
             const hasActive = sport.pools.some(p => getEffectiveActive(p));
             const poolCount = sport.pools.length;
             return (
@@ -596,9 +606,28 @@ function GlobalAdminHub({
   poolSettings,
   onTogglePoolActive,
   onRenamePool,
+  onReorderPools,
+  sports,
 }) {
-  const [editingPool, setEditingPool] = useState(null);   // poolId being renamed
+  const [editingPool, setEditingPool] = useState(null);
   const [editName, setEditName]       = useState("");
+  const [dragIdx, setDragIdx]         = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+
+  // Flat ordered list of all pools for the table
+  const flatPools = sports.flatMap(sport =>
+    sport.pools.map(pool => ({ pool, sport }))
+  );
+
+  function handleDrop(toIdx) {
+    if (dragIdx === null || dragIdx === toIdx) return;
+    const newOrder = flatPools.map(e => e.pool.id);
+    const [moved] = newOrder.splice(dragIdx, 1);
+    newOrder.splice(toIdx, 0, moved);
+    onReorderPools(newOrder);
+    setDragIdx(null);
+    setDragOverIdx(null);
+  }
 
   if (!adminAuthed) {
     return (
@@ -656,72 +685,84 @@ function GlobalAdminHub({
 
       {/* Pool Management */}
       <table className="pool-mgmt-table">
-          <thead>
-            <tr>
-              <th>Sport</th>
-              <th>Pool Name</th>
-              <th>Status</th>
-              <th>Active</th>
-            </tr>
-          </thead>
-          <tbody>
-            {SPORTS.flatMap(sport =>
-              sport.pools.map(pool => {
-                const isActive    = poolSettings[pool.id]?.active ?? pool.active;
-                const displayName = poolSettings[pool.id]?.customName || pool.name;
-                const isEditing   = editingPool === pool.id;
-                return (
-                  <tr key={pool.id}>
-                    <td>
-                      <div className="pmt-sport-cell">
-                        <div className="pmt-sport-icon">{sport.icon}</div>
-                        <span className="pmt-sport-name">{sport.name}</span>
-                      </div>
-                    </td>
-                    <td>
-                      {isEditing ? (
-                        <div className="pmt-pool-row">
-                          <input
-                            className="pmt-rename-input"
-                            value={editName}
-                            onChange={e => setEditName(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === "Enter") { onRenamePool(pool.id, editName); setEditingPool(null); }
-                              if (e.key === "Escape") setEditingPool(null);
-                            }}
-                            autoFocus
-                          />
-                          <button className="pmt-save-btn" onClick={() => { onRenamePool(pool.id, editName); setEditingPool(null); }}>Save</button>
-                          <button className="pmt-cancel-btn" onClick={() => setEditingPool(null)}>✕</button>
-                        </div>
-                      ) : (
-                        <div className="pmt-pool-row">
-                          <span className="pmt-pool-name">{displayName}</span>
-                          <button className="pmt-edit-btn" onClick={() => { setEditingPool(pool.id); setEditName(displayName); }}>✎ Rename</button>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`pmt-status-chip ${isActive ? "active" : "inactive"}`}>
-                        {isActive ? "● Active" : "○ Inactive"}
-                      </span>
-                    </td>
-                    <td>
-                      <label className="toggle-switch">
-                        <input
-                          type="checkbox"
-                          checked={isActive}
-                          onChange={e => onTogglePoolActive(pool.id, e.target.checked)}
-                        />
-                        <span className="toggle-slider" />
-                      </label>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+        <thead>
+          <tr>
+            <th style={{ width: 28 }}></th>
+            <th>Sport</th>
+            <th>Pool Name</th>
+            <th>Status</th>
+            <th>Active</th>
+          </tr>
+        </thead>
+        <tbody>
+          {flatPools.map(({ pool, sport }, idx) => {
+            const isActive    = poolSettings[pool.id]?.active ?? pool.active;
+            const displayName = poolSettings[pool.id]?.customName || pool.name;
+            const isEditing   = editingPool === pool.id;
+            const isDragging  = dragIdx === idx;
+            const isDragOver  = dragOverIdx === idx && dragIdx !== idx;
+            return (
+              <tr
+                key={pool.id}
+                draggable
+                onDragStart={() => setDragIdx(idx)}
+                onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }}
+                onDrop={() => handleDrop(idx)}
+                onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+                className={`${isDragging ? "pool-row-dragging" : ""}${isDragOver ? " pool-row-drag-over" : ""}`}
+              >
+                <td>
+                  <span className="pmt-drag-handle" title="Drag to reorder">⠿</span>
+                </td>
+                <td>
+                  <div className="pmt-sport-cell">
+                    <div className="pmt-sport-icon">{sport.icon}</div>
+                    <span className="pmt-sport-name">{sport.name}</span>
+                  </div>
+                </td>
+                <td>
+                  {isEditing ? (
+                    <div className="pmt-pool-row">
+                      <input
+                        className="pmt-rename-input"
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") { onRenamePool(pool.id, editName); setEditingPool(null); }
+                          if (e.key === "Escape") setEditingPool(null);
+                        }}
+                        autoFocus
+                      />
+                      <button className="pmt-save-btn" onClick={() => { onRenamePool(pool.id, editName); setEditingPool(null); }}>Save</button>
+                      <button className="pmt-cancel-btn" onClick={() => setEditingPool(null)}>✕</button>
+                    </div>
+                  ) : (
+                    <div className="pmt-pool-row">
+                      <span className="pmt-pool-name">{displayName}</span>
+                      <button className="pmt-edit-btn" onClick={() => { setEditingPool(pool.id); setEditName(displayName); }}>✎ Rename</button>
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <span className={`pmt-status-chip ${isActive ? "active" : "inactive"}`}>
+                    {isActive ? "● Active" : "○ Inactive"}
+                  </span>
+                </td>
+                <td>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={isActive}
+                      onChange={e => onTogglePoolActive(pool.id, e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -737,6 +778,7 @@ export default function App() {
   const [adminLoginError, setAdminLoginError]   = useState("");
   const [showAdminPass, setShowAdminPass]       = useState(false);
   const [poolSettings, setPoolSettings]         = useState({});
+  const [poolOrder, setPoolOrder]               = useState([]);
 
   // ── Firebase listeners ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -746,7 +788,10 @@ export default function App() {
     const unsubSettings = db
       ? onValue(ref(db, "admin/poolSettings"), snap => setPoolSettings(snap.val() || {}))
       : () => {};
-    return () => { unsubAuth(); unsubSettings(); };
+    const unsubOrder = db
+      ? onValue(ref(db, "admin/poolOrder"), snap => setPoolOrder(snap.val() || []))
+      : () => {};
+    return () => { unsubAuth(); unsubSettings(); unsubOrder(); };
   }, []);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -790,6 +835,42 @@ export default function App() {
     await set(ref(db, `admin/poolSettings/${poolId}/customName`), newName.trim());
   }
 
+  async function handleReorderPools(newOrderArray) {
+    if (!db) return;
+    await set(ref(db, "admin/poolOrder"), newOrderArray);
+  }
+
+  function getOrderedSports() {
+    // Build a flat list of all pools across all sports
+    const allEntries = SPORTS.flatMap(sport =>
+      sport.pools.map(pool => ({ pool, sport }))
+    );
+    // Sort by poolOrder if we have one saved, otherwise keep registry order
+    if (poolOrder.length > 0) {
+      allEntries.sort((a, b) => {
+        const ai = poolOrder.indexOf(a.pool.id);
+        const bi = poolOrder.indexOf(b.pool.id);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      });
+    }
+    // Rebuild sports array in the new order, with pools also sorted within each sport
+    const seenSports = new Set();
+    const orderedSports = [];
+    allEntries.forEach(({ sport }) => {
+      if (!seenSports.has(sport.id)) {
+        seenSports.add(sport.id);
+        orderedSports.push({
+          ...sport,
+          pools: allEntries.filter(e => e.sport.id === sport.id).map(e => e.pool),
+        });
+      }
+    });
+    return orderedSports;
+  }
+
   function getEffectiveActive(pool) {
     return poolSettings[pool.id]?.active ?? pool.active;
   }
@@ -802,6 +883,7 @@ export default function App() {
         <PoolHubHome
           onSelectPool={setSelectedPool}
           poolSettings={poolSettings}
+          sports={getOrderedSports()}
         />
       );
     }
@@ -823,6 +905,8 @@ export default function App() {
           poolSettings={poolSettings}
           onTogglePoolActive={handleTogglePoolActive}
           onRenamePool={handleRenamePool}
+          onReorderPools={handleReorderPools}
+          sports={getOrderedSports()}
         />
       );
     }
@@ -868,6 +952,7 @@ export default function App() {
           onSelectPool={setSelectedPool}
           adminAuthed={adminAuthed}
           poolSettings={poolSettings}
+          sports={getOrderedSports()}
         />
         <main className="shell-main">
           {renderMainContent()}
