@@ -777,8 +777,12 @@ export default function App() {
   const [adminPass, setAdminPass]               = useState("");
   const [adminLoginError, setAdminLoginError]   = useState("");
   const [showAdminPass, setShowAdminPass]       = useState(false);
-  const [poolSettings, setPoolSettings]         = useState({});
-  const [poolOrder, setPoolOrder]               = useState([]);
+  const [poolSettings, setPoolSettings]         = useState(() => {
+    try { const c = localStorage.getItem("sph_poolSettings"); return c ? JSON.parse(c) : {}; } catch { return {}; }
+  });
+  const [poolOrder, setPoolOrder]               = useState(() => {
+    try { const c = localStorage.getItem("sph_poolOrder"); return c ? JSON.parse(c) : []; } catch { return []; }
+  });
 
   // ── Firebase listeners ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -786,10 +790,18 @@ export default function App() {
       ? onAuthStateChanged(auth, user => setAdminAuthed(!!user))
       : () => {};
     const unsubSettings = db
-      ? onValue(ref(db, "admin/poolSettings"), snap => setPoolSettings(snap.val() || {}))
+      ? onValue(ref(db, "admin/poolSettings"), snap => {
+          const val = snap.val() || {};
+          setPoolSettings(val);
+          try { localStorage.setItem("sph_poolSettings", JSON.stringify(val)); } catch {}
+        })
       : () => {};
     const unsubOrder = db
-      ? onValue(ref(db, "admin/poolOrder"), snap => setPoolOrder(snap.val() || []))
+      ? onValue(ref(db, "admin/poolOrder"), snap => {
+          const val = snap.val() || [];
+          setPoolOrder(val);
+          try { localStorage.setItem("sph_poolOrder", JSON.stringify(val)); } catch {}
+        })
       : () => {};
     return () => { unsubAuth(); unsubSettings(); unsubOrder(); };
   }, []);
