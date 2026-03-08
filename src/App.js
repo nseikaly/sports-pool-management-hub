@@ -162,7 +162,8 @@ const css = `
   .pi-matchup { display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center; }
   .pi-vs { font-size:0.65rem; color:var(--text3); text-align:center; font-weight:700; }
 
-  .pi-team { display:flex; flex-direction:column; align-items:center; gap:5px; padding:10px 6px 12px;
+  .pi-team { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+    padding:10px 6px 12px; height:100px; box-sizing:border-box;
     background:var(--surface3); border:1px solid var(--border2); border-radius:7px; cursor:pointer;
     transition:all 0.15s; position:relative; }
   .pi-team:hover:not(:disabled) { border-color:var(--gold); }
@@ -171,8 +172,7 @@ const css = `
   .pi-team.pi-ok    { background:rgba(34,197,94,0.1);  border-color:var(--green); }
   .pi-team.pi-wrong { background:rgba(239,68,68,0.05); border-color:rgba(239,68,68,0.2);
     opacity:0.55; }
-  .pi-team.pi-tbd-slot { pointer-events:none; opacity:0.3; min-height:70px;
-    justify-content:center; border-style:dashed; }
+  .pi-team.pi-tbd-slot { pointer-events:none; opacity:0.3; border-style:dashed; }
   .pi-team-name { font-size:0.68rem; font-weight:600; text-align:center; line-height:1.2;
     color:var(--text2); max-width:80px; word-break:break-word; }
   .pi-team.pi-sel   .pi-team-name { color:var(--gold2); }
