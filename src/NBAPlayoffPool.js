@@ -2202,10 +2202,13 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
     const roundsArr = Array.isArray(results?.rounds)
       ? results.rounds
       : Object.values(results?.rounds || {});
-    // Don't allow changing admin-settled series in scenario
+    // Don't allow changing admin-settled series in scenario.
+    // Use !!s?.winner (truthy) rather than s?.winner != null so that a series
+    // whose winner was reset to "" (empty string) by the admin is treated as
+    // unsettled — consistent with getAdminResultForSeries and renderCard.
     const isSettled = roundsArr
       .flatMap(r => Array.isArray(r.series) ? r.series : Object.values(r.series || {}))
-      .some(s => s?.id === seriesId && s?.winner != null);
+      .some(s => s?.id === seriesId && !!s?.winner);
     if (isSettled) return;
     // Build a basePicks map of all admin-settled results so cleanDownstreamPicks
     // can resolve real team names (instead of BRACKET_CONFIG placeholders) when
@@ -2290,9 +2293,11 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       });
       if (roundIdx === -1) return;
 
-      // CRITICAL: Always save both the field being updated AND the id
+      // CRITICAL: Always save both the field being updated AND the id.
+      // Store null (not "") when value is empty so Firebase doesn't keep a stale
+      // empty-string winner that confuses truthy checks elsewhere (e.g. scenario).
       const updates = {};
-      updates[`${dbPath}/results/rounds/${roundIdx}/series/${seriesIdx}/${field}`] = value;
+      updates[`${dbPath}/results/rounds/${roundIdx}/series/${seriesIdx}/${field}`] = value || null;
       updates[`${dbPath}/results/rounds/${roundIdx}/series/${seriesIdx}/id`] = seriesId;
       
       await update(ref(db), updates);
