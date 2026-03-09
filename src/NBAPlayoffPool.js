@@ -1818,6 +1818,7 @@ function formatDeadline(isoStr) {
     return d.toLocaleString("en-US", {
       weekday: "long", year: "numeric", month: "long", day: "numeric",
       hour: "numeric", minute: "2-digit", hour12: true,
+      timeZone: "America/Los_Angeles", timeZoneName: "short",
     });
   } catch { return isoStr; }
 }
