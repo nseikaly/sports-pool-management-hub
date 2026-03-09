@@ -2202,13 +2202,10 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
     const roundsArr = Array.isArray(results?.rounds)
       ? results.rounds
       : Object.values(results?.rounds || {});
-    // Don't allow changing admin-settled series in scenario.
-    // Use !!s?.winner (truthy) rather than s?.winner != null so that a series
-    // whose winner was reset to "" (empty string) by the admin is treated as
-    // unsettled — consistent with getAdminResultForSeries and renderCard.
+    // Don't allow changing admin-settled series in scenario
     const isSettled = roundsArr
       .flatMap(r => Array.isArray(r.series) ? r.series : Object.values(r.series || {}))
-      .some(s => s?.id === seriesId && !!s?.winner);
+      .some(s => s?.id === seriesId && s?.winner != null);
     if (isSettled) return;
     // Build a basePicks map of all admin-settled results so cleanDownstreamPicks
     // can resolve real team names (instead of BRACKET_CONFIG placeholders) when
@@ -2218,52 +2215,29 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       const arr = Array.isArray(round.series) ? round.series : Object.values(round.series || {});
       arr.forEach(s => { if (s?.id && s?.winner) adminPicks[s.id] = { winner: s.winner }; });
     });
-    // Pass adminPlayInSeeds so play-in confirmed teams (e.g. "LA Clippers" as W8)
-    // are recognised as valid in their R1 slot and not immediately cleared.
-    setScenarioPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, adminPicks, adminPlayInSeeds));
+    setScenarioPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, adminPicks));
   };
   const handleScenarioAutoFill = () => {
     // Use admin-only play-in seeds so elimination is based on confirmed results.
     const eliminated = getEliminatedTeams(results, adminPlayInSeeds);
-    // Build per-slot substitution maps for picks stored with BRACKET_CONFIG placeholder
-    // names (e.g. "Golden State Warriors" stored for W8 before play-in results are set).
-    // Uses path-aware lookups to avoid collisions when a play-in winner's team name is
-    // the same as the BRACKET_CONFIG placeholder for a *different* slot — e.g. when GS
-    // Warriors wins W7 (s6) but is also the default s5 W8 placeholder, a flat global map
-    // would incorrectly substitute every GS pick to Portland Trail Blazers, including
-    // legitimate s6/s10 picks where GS is the actual W7 team.
-    const r1SubMaps = {};
+    // Build substitution map for picks stored with BRACKET_CONFIG placeholder names
+    // (e.g. "Miami Heat" stored for the E8 slot before admin set play-in results).
+    // Maps configBottom → actualPlayInTeam so old-name picks are treated correctly.
+    const picksSubMap = {};
     Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
       const actualTeam = adminPlayInSeeds?.[seedKey];
       if (!actualTeam) return;
       const r1Config = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
       if (!r1Config || actualTeam === r1Config.bottom) return;
-      r1SubMaps[sid] = { [r1Config.bottom]: actualTeam };
+      picksSubMap[r1Config.bottom] = actualTeam;
     });
-    // Maps each R2 series to the R1 slots that exclusively feed it so substitutions
-    // only apply within their own bracket path (e.g. GS→Portland only in s5/s9, not s6/s10).
-    const feedsR1 = {
-      s9: ["s5","s8"], s10: ["s6","s7"],
-      s11: ["s1","s4"], s12: ["s2","s3"],
-    };
-    function getSubForSeries(sid) {
-      if (r1SubMaps[sid]) return r1SubMaps[sid];
-      const feeders = feedsR1[sid];
-      if (!feeders) return {}; // R3+ (conf finals, Finals) — too ambiguous to substitute
-      return Object.assign({}, ...feeders.map(f => r1SubMaps[f] || {}));
-    }
     // Use whichever entry is selected in the scenario toggle
     const srcPicks = scenarioEntry === 1 ? myPicks : myPicks2;
     const filled = {};
     Object.entries(srcPicks).forEach(([sid, pick]) => {
       if (!pick?.winner) return;
-      const effectiveWinner = getSubForSeries(sid)[pick.winner] || pick.winner;
-      if (!eliminated.has(effectiveWinner)) {
-        // Store with the substituted winner name so buildScenarioResults uses the
-        // confirmed play-in team (e.g. "LA Clippers") instead of the original
-        // stored name ("Golden State Warriors") — otherwise points don't match.
-        filled[sid] = { ...pick, winner: effectiveWinner };
-      }
+      const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
+      if (!eliminated.has(effectiveWinner)) filled[sid] = pick;
     });
     setScenarioPicks(filled);
   };
@@ -2309,11 +2283,9 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       });
       if (roundIdx === -1) return;
 
-      // CRITICAL: Always save both the field being updated AND the id.
-      // Store null (not "") when value is empty so Firebase doesn't keep a stale
-      // empty-string winner that confuses truthy checks elsewhere (e.g. scenario).
+      // CRITICAL: Always save both the field being updated AND the id
       const updates = {};
-      updates[`${dbPath}/results/rounds/${roundIdx}/series/${seriesIdx}/${field}`] = value || null;
+      updates[`${dbPath}/results/rounds/${roundIdx}/series/${seriesIdx}/${field}`] = value;
       updates[`${dbPath}/results/rounds/${roundIdx}/series/${seriesIdx}/id`] = seriesId;
       
       await update(ref(db), updates);
