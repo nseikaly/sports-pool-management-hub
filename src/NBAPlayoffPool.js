@@ -51,6 +51,42 @@ function applyPlayInPatch(series, playInSeeds) {
   return { ...series, bottom: team || "Play-In TBD" };
 }
 
+// ─── Effective Team Seeds ──────────────────────────────────────────────────────
+// Returns a seed-number lookup (team name → seed#) that incorporates actual
+// play-in results so that later-round bracket cards show the right badge:
+//   • Play-in winner teams get the correct seed number (7 or 8)
+//   • Config-default teams displaced by a play-in winner lose their stale number
+//     (unless they appear as the winner in a *different* play-in slot)
+// Falls back to the static TEAM_SEEDS when no play-in data is provided.
+function buildEffectiveTeamSeeds(playInSeeds) {
+  if (!playInSeeds) return TEAM_SEEDS;
+  const effective = { ...TEAM_SEEDS };
+  const SLOT_SEED_NUM = { E7: 7, E8: 8, W7: 7, W8: 8 };
+  // Map each slot key → the BRACKET_CONFIG placeholder team occupying that slot
+  const configTeamForSlot = {};
+  Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
+    const r1 = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
+    if (r1) configTeamForSlot[seedKey] = r1.bottom;
+  });
+  Object.entries(playInSeeds).forEach(([seedKey, actualTeam]) => {
+    if (!actualTeam) return;
+    const seedNum = SLOT_SEED_NUM[seedKey];
+    if (seedNum == null) return;
+    const configTeam = configTeamForSlot[seedKey];
+    // Give the actual winner the correct seed number for this slot
+    effective[actualTeam] = seedNum;
+    // If the config placeholder was displaced, clear its stale seed number —
+    // but only if it doesn't appear as the winner in a different play-in slot
+    if (configTeam && configTeam !== actualTeam) {
+      const appearsElsewhere = Object.entries(playInSeeds).some(
+        ([k, t]) => k !== seedKey && t === configTeam
+      );
+      if (!appearsElsewhere) effective[configTeam] = undefined;
+    }
+  });
+  return effective;
+}
+
 // Returns the two teams that will face off in Play-In Game 3 for a conference,
 // derived from the winners/losers of Games 1 and 2.
 function getGame3Teams(conf, picks, adminResults) {
@@ -916,7 +952,7 @@ function shortTeamName(fullName) {
 
 // ─── Bracket Matchup (compact card for bracket view) ─────────────────────
 
-function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost, onPlayInTBDClick }) {
+function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFinals, eliminatedTeams, topGhost, bottomGhost, onPlayInTBDClick, teamSeeds = TEAM_SEEDS }) {
   const pick   = picks?.[series.id] || {};
   const result = getAdminResultForSeries(results, series.id);
   const settled = result?.winner != null;
@@ -925,16 +961,16 @@ function BracketMatchup({ series, round, picks, onPick, readOnly, results, isFin
   // series is already settled by admin results. Unresolved later-round slots whose
   // upstream pick hasn't been made yet keep a placeholder name (not in TEAM_SEEDS)
   // and should be shown as blank/non-interactive.
-  const topIsReal    = (series.top    in TEAM_SEEDS) || settled;
-  const bottomIsReal = (series.bottom in TEAM_SEEDS) || settled;
+  const topIsReal    = (series.top    in teamSeeds) || settled;
+  const bottomIsReal = (series.bottom in teamSeeds) || settled;
   const bothReal     = topIsReal && bottomIsReal;
 
   // Seed display: prefer the series' own topSeed/bottomSeed (set in BRACKET_CONFIG for R1
   // and carried through applyPlayInPatch), which reflects the earned playoff seed (7 or 8).
-  // Fall back to TEAM_SEEDS for later-round teams that resolved by name lookup.
+  // Fall back to teamSeeds (play-in-aware lookup) for later-round teams resolved by name.
   // Only show a seed if the slot is a real team (not a TBD placeholder).
-  const topSeed    = topIsReal    ? (series.topSeed    ?? TEAM_SEEDS[series.top])    : null;
-  const bottomSeed = bottomIsReal ? (series.bottomSeed ?? TEAM_SEEDS[series.bottom]) : null;
+  const topSeed    = topIsReal    ? (series.topSeed    ?? teamSeeds[series.top])    : null;
+  const bottomSeed = bottomIsReal ? (series.bottomSeed ?? teamSeeds[series.bottom]) : null;
 
   const pickWinner = (team) => {
     if (!readOnly && bothReal) {
@@ -1216,6 +1252,12 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
   // instead of New Orleans Pelicans for the W8 slot).
   const eliminatedTeams = getEliminatedTeams(results, playInSeeds ?? null);
 
+  // ── Effective team seeds (play-in-aware seed number lookup) ───────────────
+  // Overrides the static TEAM_SEEDS so later-round cards show the right badge:
+  // play-in winner teams get the correct seed (7 or 8); displaced config-default
+  // teams lose their stale seed number.
+  const effectiveTeamSeeds = buildEffectiveTeamSeeds(playInSeeds);
+
   // ── Card renderer ─────────────────────────────────────────────────────────
   function renderCard(sid, topPx, col) {
     let series = seriesMap[sid];
@@ -1282,6 +1324,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
             eliminatedTeams={eliminatedTeams}
             topGhost={topGhost}
             bottomGhost={bottomGhost}
+            teamSeeds={effectiveTeamSeeds}
           />
         </div>
       );
@@ -1295,6 +1338,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
           isFinals={sid === "s15"}
           eliminatedTeams={eliminatedTeams}
           onPlayInTBDClick={onPlayInTBDClick}
+          teamSeeds={effectiveTeamSeeds}
         />
       </div>
     );
