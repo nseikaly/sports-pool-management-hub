@@ -2259,7 +2259,10 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       const arr = Array.isArray(round.series) ? round.series : Object.values(round.series || {});
       arr.forEach(s => { if (s?.id && s?.winner) adminPicks[s.id] = { winner: s.winner }; });
     });
-    setScenarioPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, adminPicks));
+    // Pass adminPlayInSeeds so cleanDownstreamPicks recognises play-in winner teams
+    // (e.g. "Atlanta Hawks" as the E8) as valid picks for their R1 slot instead of
+    // clearing them because they don't match the BRACKET_CONFIG placeholder name.
+    setScenarioPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, adminPicks, adminPlayInSeeds));
   };
   const handleScenarioAutoFill = () => {
     // Use admin-only play-in seeds so elimination is based on confirmed results.
@@ -2819,22 +2822,24 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
                   </div>
                 </div>
 
-                {/* Entry toggle — selects which entry's picks are used as ghost reference + auto-fill source */}
-                <div style={{marginBottom:20}}>
-                  <div className="xs muted" style={{marginBottom:8, letterSpacing:'1px'}}>Viewing picks for:</div>
-                  <div className="entry-toggle">
-                    <button className={`entry-btn ${scenarioEntry === 1 ? "active" : ""}`} onClick={() => setScenarioEntry(1)}>
-                      {submitted && myName.trim() ? myName.trim().slice(0,14) : "Entry 1"}
-                      {submitted && <span className="entry-check">✓</span>}
-                    </button>
-                    <button className={`entry-btn ${scenarioEntry === 2 ? "active" : ""}`} onClick={() => setScenarioEntry(2)}>
-                      {submitted2 && (myName2.trim() || myName.trim())
-                        ? (myName2.trim() || myName.trim()).slice(0,14)
-                        : "Entry 2"}
-                      {submitted2 && <span className="entry-check">✓</span>}
-                    </button>
+                {/* Entry toggle — only shown when both entries are submitted */}
+                {submitted2 && (
+                  <div style={{marginBottom:20}}>
+                    <div className="xs muted" style={{marginBottom:8, letterSpacing:'1px'}}>Viewing picks for:</div>
+                    <div className="entry-toggle">
+                      <button className={`entry-btn ${scenarioEntry === 1 ? "active" : ""}`} onClick={() => setScenarioEntry(1)}>
+                        {submitted && myName.trim() ? myName.trim().slice(0,14) : "Entry 1"}
+                        {submitted && <span className="entry-check">✓</span>}
+                      </button>
+                      <button className={`entry-btn ${scenarioEntry === 2 ? "active" : ""}`} onClick={() => setScenarioEntry(2)}>
+                        {(myName2.trim() || myName.trim())
+                          ? (myName2.trim() || myName.trim()).slice(0,14)
+                          : "Entry 2"}
+                        <span className="entry-check">✓</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="scenario-layout">
                   {/* Left column: projected leaderboard */}
