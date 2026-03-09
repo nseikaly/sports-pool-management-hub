@@ -1258,6 +1258,18 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
   // teams lose their stale seed number.
   const effectiveTeamSeeds = buildEffectiveTeamSeeds(playInSeeds);
 
+  // ── Play-in-substituted participant picks (scenario mode only) ─────────────
+  // Ghost pick labels and settled-series green/teal/red colouring both read from
+  // myPicksForScenario.  Without substitution, picks that used an old play-in
+  // team name (e.g. "Golden State Warriors" for the W8 slot) would:
+  //   • show the wrong team name in the ghost label ("Warriors" instead of "Blazers")
+  //   • colour correctly-picked play-in winners teal instead of green
+  // Applying the same virtualSubstitutePicksForPlayIn transform used by My Picks
+  // fixes both problems without touching any stored data.
+  const substitutedMyPicks = (scenarioMode && myPicksForScenario && playInSeeds)
+    ? virtualSubstitutePicksForPlayIn(myPicksForScenario, playInSeeds)
+    : (myPicksForScenario || {});
+
   // ── Card renderer ─────────────────────────────────────────────────────────
   function renderCard(sid, topPx, col) {
     let series = seriesMap[sid];
@@ -1286,7 +1298,10 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
         // (either the upstream series settled with a different winner, OR the team
         //  is already in eliminatedTeams from an even earlier round — enabling
         //  multi-round propagation e.g. R1 loss shows ghost through R2, CF, Finals)
-        const myTopPick = myPicksForScenario?.[feed.top]?.winner;
+        // Use substitutedMyPicks so ghost labels show the actual admin play-in team
+        // name (e.g. "Atlanta Hawks") rather than the participant's original pick
+        // name (e.g. "Miami Heat") when those were replaced by admin results.
+        const myTopPick = substitutedMyPicks[feed.top]?.winner;
         if (myTopPick) {
           const topAdminResult = getAdminResultForSeries(results, feed.top);
           if ((topAdminResult?.winner && myTopPick !== topAdminResult.winner) ||
@@ -1295,7 +1310,7 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
           }
         }
         // Bottom slot: same logic
-        const myBottomPick = myPicksForScenario?.[feed.bottom]?.winner;
+        const myBottomPick = substitutedMyPicks[feed.bottom]?.winner;
         if (myBottomPick) {
           const bottomAdminResult = getAdminResultForSeries(results, feed.bottom);
           if ((bottomAdminResult?.winner && myBottomPick !== bottomAdminResult.winner) ||
@@ -1305,11 +1320,13 @@ function BracketView({ picks, onPick, readOnly, results, scenarioMode, myPicksFo
         }
       }
 
-      // Settled series: pass full myPicksForScenario so BracketMatchup can look up
-      // `picks[sid]` and correctly compare it against the admin result (green/red/teal).
+      // Settled series: use substitutedMyPicks (play-in names resolved) so
+      // BracketMatchup compares the correct team name against the admin result —
+      // e.g. participant effectively picked "Portland Trail Blazers" (their W8
+      // choice) which should show green, not teal.
       // Unsettled series: pass only the scenario pick for this slot.
       const picksForCard = isSettled
-        ? (myPicksForScenario || {})
+        ? substitutedMyPicks
         : { [sid]: scenarioPick };
 
       return (
