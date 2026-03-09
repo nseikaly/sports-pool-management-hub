@@ -134,6 +134,14 @@ const shellCss = `
     opacity:1; transition:opacity 0.15s;
   }
   .sb-collapsed .sb-inactive-chip { opacity:0; }
+  .sb-hidden-chip {
+    font-size:0.48rem; letter-spacing:1px; text-transform:uppercase;
+    color:var(--gold); background:rgba(201,168,76,0.08);
+    border:1px solid rgba(201,168,76,0.3); border-radius:3px;
+    padding:1px 5px; flex-shrink:0;
+    opacity:1; transition:opacity 0.15s;
+  }
+  .sb-collapsed .sb-hidden-chip { opacity:0; }
 
   /* Collapsed icon rail sport pills */
   .sb-collapsed .sb-sport-hdr {
@@ -434,14 +442,19 @@ function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed,
       {/* Sport sections */}
       <div className="sb-scroll">
         {sports.map(sport => {
+          // Non-admins only see pools where visible !== false; admins see all
+          const visiblePools = sport.pools.filter(pool =>
+            adminAuthed || poolSettings[pool.id]?.visible !== false
+          );
+          if (visiblePools.length === 0) return null;
           const isExpanded = expandedSports[sport.id];
-          const hasActive = sportHasActive(sport);
+          const hasActive = visiblePools.some(p => getEffectiveActive(p));
           return (
             <div key={sport.id} className="sb-sport">
               <div
                 className={`sb-sport-hdr${isExpanded && !collapsed ? " open" : ""}`}
                 onClick={() => collapsed
-                  ? onSelectPool(sport.pools.find(p => getEffectiveActive(p))?.id || sport.pools[0]?.id)
+                  ? onSelectPool(visiblePools.find(p => getEffectiveActive(p))?.id || visiblePools[0]?.id)
                   : toggleSport(sport.id)
                 }
                 title={collapsed ? sport.name : undefined}
@@ -453,20 +466,22 @@ function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed,
               {/* Pool items — only show when expanded and not collapsed */}
               {(isExpanded || collapsed) && (
                 <div className="sb-pool-list">
-                  {sport.pools.map(pool => {
+                  {visiblePools.map(pool => {
                     const isActive    = getEffectiveActive(pool);
                     const isSelected  = selectedPool === pool.id;
+                    const isHidden    = poolSettings[pool.id]?.visible === false;
                     const displayName = poolSettings[pool.id]?.customName || pool.name;
                     return (
                       <div
                         key={pool.id}
                         className={`sb-pool-item${isSelected ? " active" : ""}${!isActive ? " inactive" : ""}`}
-                        onClick={isActive ? () => onSelectPool(pool.id) : undefined}
+                        onClick={isActive || adminAuthed ? () => onSelectPool(pool.id) : undefined}
                         title={collapsed ? (isActive ? `${sport.name}: ${displayName}` : `${sport.name}: ${displayName} (Not Active)`) : undefined}
                       >
                         {isActive && <span className="sb-pool-dot" />}
                         <span className="sb-pool-name">{displayName}</span>
-                        {!isActive && <span className="sb-inactive-chip">Not Active</span>}
+                        {!isActive && !isHidden && <span className="sb-inactive-chip">Not Active</span>}
+                        {isHidden && adminAuthed && <span className="sb-hidden-chip">Hidden</span>}
                       </div>
                     );
                   })}
@@ -494,14 +509,18 @@ function Sidebar({ collapsed, onToggle, selectedPool, onSelectPool, adminAuthed,
 
 // ─── Pool Hub Home ────────────────────────────────────────────────────────────
 
-function PoolHubHome({ onSelectPool, poolSettings, sports }) {
+function PoolHubHome({ onSelectPool, poolSettings, sports, adminAuthed }) {
   function getEffectiveActive(pool) {
     return poolSettings[pool.id]?.active ?? pool.active;
   }
 
+  function isPoolVisible(pool) {
+    return adminAuthed || poolSettings[pool.id]?.visible !== false;
+  }
+
   const activePools = sports.flatMap(sport =>
     sport.pools
-      .filter(pool => getEffectiveActive(pool))
+      .filter(pool => getEffectiveActive(pool) && isPoolVisible(pool))
       .map(pool => ({ pool, sport }))
   );
 
@@ -544,14 +563,16 @@ function PoolHubHome({ onSelectPool, poolSettings, sports }) {
         <div className="hub-section-label">All Sports</div>
         <div className="hub-sports-grid">
           {sports.map(sport => {
-            const hasActive = sport.pools.some(p => getEffectiveActive(p));
-            const poolCount = sport.pools.length;
+            const visiblePools = sport.pools.filter(p => isPoolVisible(p));
+            if (visiblePools.length === 0) return null;
+            const hasActive = visiblePools.some(p => getEffectiveActive(p));
+            const poolCount = visiblePools.length;
             return (
               <div
                 key={sport.id}
                 className={`hub-sport-card${hasActive ? " has-active" : ""}`}
                 onClick={() => {
-                  const target = sport.pools.find(p => getEffectiveActive(p)) || sport.pools[0];
+                  const target = visiblePools.find(p => getEffectiveActive(p)) || visiblePools[0];
                   if (target) onSelectPool(target.id);
                 }}
               >
@@ -605,6 +626,7 @@ function GlobalAdminHub({
   onAdminLogin, onAdminLogout,
   poolSettings,
   onTogglePoolActive,
+  onTogglePoolVisible,
   onRenamePool,
   onReorderPools,
   sports,
@@ -692,11 +714,13 @@ function GlobalAdminHub({
             <th>Pool Name</th>
             <th>Status</th>
             <th>Active</th>
+            <th title="Show/hide this pool in the sidebar and hub for regular users">Show</th>
           </tr>
         </thead>
         <tbody>
           {flatPools.map(({ pool, sport }, idx) => {
             const isActive    = poolSettings[pool.id]?.active ?? pool.active;
+            const isVisible   = poolSettings[pool.id]?.visible !== false; // default true
             const displayName = poolSettings[pool.id]?.customName || pool.name;
             const isEditing   = editingPool === pool.id;
             const isDragging  = dragIdx === idx;
@@ -754,6 +778,16 @@ function GlobalAdminHub({
                       type="checkbox"
                       checked={isActive}
                       onChange={e => onTogglePoolActive(pool.id, e.target.checked)}
+                    />
+                    <span className="toggle-slider" />
+                  </label>
+                </td>
+                <td>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={isVisible}
+                      onChange={e => onTogglePoolVisible(pool.id, e.target.checked)}
                     />
                     <span className="toggle-slider" />
                   </label>
@@ -842,6 +876,11 @@ export default function App() {
     await set(ref(db, `admin/poolSettings/${poolId}/active`), value);
   }
 
+  async function handleTogglePoolVisible(poolId, value) {
+    if (!db) return;
+    await set(ref(db, `admin/poolSettings/${poolId}/visible`), value);
+  }
+
   async function handleRenamePool(poolId, newName) {
     if (!db || !newName.trim()) return;
     await set(ref(db, `admin/poolSettings/${poolId}/customName`), newName.trim());
@@ -896,6 +935,7 @@ export default function App() {
           onSelectPool={setSelectedPool}
           poolSettings={poolSettings}
           sports={getOrderedSports()}
+          adminAuthed={adminAuthed}
         />
       );
     }
@@ -916,6 +956,7 @@ export default function App() {
           onAdminLogout={handleAdminLogout}
           poolSettings={poolSettings}
           onTogglePoolActive={handleTogglePoolActive}
+          onTogglePoolVisible={handleTogglePoolVisible}
           onRenamePool={handleRenamePool}
           onReorderPools={handleReorderPools}
           sports={getOrderedSports()}
