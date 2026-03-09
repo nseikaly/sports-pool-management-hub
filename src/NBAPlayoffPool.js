@@ -2220,16 +2220,27 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
   const handleScenarioAutoFill = () => {
     // Use admin-only play-in seeds so elimination is based on confirmed results.
     const eliminated = getEliminatedTeams(results, adminPlayInSeeds);
-    // Build substitution map for picks stored with BRACKET_CONFIG placeholder names
-    // (e.g. "Miami Heat" stored for the E8 slot before admin set play-in results).
-    // Maps configBottom → actualPlayInTeam so old-name picks are treated correctly.
+    // Build substitution map: old team name → actual admin-determined play-in winner.
+    // Covers (a) the BRACKET_CONFIG placeholder name (e.g. "Miami Heat" for the E8
+    // slot) and (b) the participant's own play-in pick if they chose a seed9/10 team
+    // (e.g. "Charlotte Hornets") — both must resolve to the real admin result team.
     const picksSubMap = {};
+    const SEED_TO_PI_KEY = { E8: "piE3", E7: "piE1", W8: "piW3", W7: "piW1" };
+    const srcPlayInPicks = scenarioEntry === 1 ? playInPicks : playInPicks2;
     Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
       const actualTeam = adminPlayInSeeds?.[seedKey];
       if (!actualTeam) return;
+      // (a) Map from the BRACKET_CONFIG default placeholder name
       const r1Config = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
-      if (!r1Config || actualTeam === r1Config.bottom) return;
-      picksSubMap[r1Config.bottom] = actualTeam;
+      if (r1Config && actualTeam !== r1Config.bottom) {
+        picksSubMap[r1Config.bottom] = actualTeam;
+      }
+      // (b) Map from the participant's own play-in pick for this slot
+      const piKey = SEED_TO_PI_KEY[seedKey];
+      const participantPlayInPick = piKey && srcPlayInPicks?.[piKey];
+      if (participantPlayInPick && participantPlayInPick !== actualTeam) {
+        picksSubMap[participantPlayInPick] = actualTeam;
+      }
     });
     // Use whichever entry is selected in the scenario toggle
     const srcPicks = scenarioEntry === 1 ? myPicks : myPicks2;
@@ -2237,7 +2248,10 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
     Object.entries(srcPicks).forEach(([sid, pick]) => {
       if (!pick?.winner) return;
       const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
-      if (!eliminated.has(effectiveWinner)) filled[sid] = pick;
+      if (!eliminated.has(effectiveWinner)) {
+        // Store the substituted winner name so downstream series use the correct team
+        filled[sid] = effectiveWinner !== pick.winner ? { ...pick, winner: effectiveWinner } : pick;
+      }
     });
     setScenarioPicks(filled);
   };
