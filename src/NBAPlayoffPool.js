@@ -2225,23 +2225,39 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
   const handleScenarioAutoFill = () => {
     // Use admin-only play-in seeds so elimination is based on confirmed results.
     const eliminated = getEliminatedTeams(results, adminPlayInSeeds);
-    // Build substitution map for picks stored with BRACKET_CONFIG placeholder names
-    // (e.g. "Miami Heat" stored for the E8 slot before admin set play-in results).
-    // Maps configBottom → actualPlayInTeam so old-name picks are treated correctly.
-    const picksSubMap = {};
+    // Build per-slot substitution maps for picks stored with BRACKET_CONFIG placeholder
+    // names (e.g. "Golden State Warriors" stored for W8 before play-in results are set).
+    // Uses path-aware lookups to avoid collisions when a play-in winner's team name is
+    // the same as the BRACKET_CONFIG placeholder for a *different* slot — e.g. when GS
+    // Warriors wins W7 (s6) but is also the default s5 W8 placeholder, a flat global map
+    // would incorrectly substitute every GS pick to Portland Trail Blazers, including
+    // legitimate s6/s10 picks where GS is the actual W7 team.
+    const r1SubMaps = {};
     Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
       const actualTeam = adminPlayInSeeds?.[seedKey];
       if (!actualTeam) return;
       const r1Config = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
       if (!r1Config || actualTeam === r1Config.bottom) return;
-      picksSubMap[r1Config.bottom] = actualTeam;
+      r1SubMaps[sid] = { [r1Config.bottom]: actualTeam };
     });
+    // Maps each R2 series to the R1 slots that exclusively feed it so substitutions
+    // only apply within their own bracket path (e.g. GS→Portland only in s5/s9, not s6/s10).
+    const feedsR1 = {
+      s9: ["s5","s8"], s10: ["s6","s7"],
+      s11: ["s1","s4"], s12: ["s2","s3"],
+    };
+    function getSubForSeries(sid) {
+      if (r1SubMaps[sid]) return r1SubMaps[sid];
+      const feeders = feedsR1[sid];
+      if (!feeders) return {}; // R3+ (conf finals, Finals) — too ambiguous to substitute
+      return Object.assign({}, ...feeders.map(f => r1SubMaps[f] || {}));
+    }
     // Use whichever entry is selected in the scenario toggle
     const srcPicks = scenarioEntry === 1 ? myPicks : myPicks2;
     const filled = {};
     Object.entries(srcPicks).forEach(([sid, pick]) => {
       if (!pick?.winner) return;
-      const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
+      const effectiveWinner = getSubForSeries(sid)[pick.winner] || pick.winner;
       if (!eliminated.has(effectiveWinner)) {
         // Store with the substituted winner name so buildScenarioResults uses the
         // confirmed play-in team (e.g. "LA Clippers") instead of the original
