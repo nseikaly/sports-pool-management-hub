@@ -2215,7 +2215,9 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       const arr = Array.isArray(round.series) ? round.series : Object.values(round.series || {});
       arr.forEach(s => { if (s?.id && s?.winner) adminPicks[s.id] = { winner: s.winner }; });
     });
-    setScenarioPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, adminPicks));
+    // Pass adminPlayInSeeds so play-in confirmed teams (e.g. "LA Clippers" as W8)
+    // are recognised as valid in their R1 slot and not immediately cleared.
+    setScenarioPicks(prev => cleanDownstreamPicks({ ...prev, [seriesId]: pick }, adminPicks, adminPlayInSeeds));
   };
   const handleScenarioAutoFill = () => {
     // Use admin-only play-in seeds so elimination is based on confirmed results.
@@ -2237,7 +2239,12 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
     Object.entries(srcPicks).forEach(([sid, pick]) => {
       if (!pick?.winner) return;
       const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
-      if (!eliminated.has(effectiveWinner)) filled[sid] = pick;
+      if (!eliminated.has(effectiveWinner)) {
+        // Store with the substituted winner name so buildScenarioResults uses the
+        // confirmed play-in team (e.g. "LA Clippers") instead of the original
+        // stored name ("Golden State Warriors") — otherwise points don't match.
+        filled[sid] = { ...pick, winner: effectiveWinner };
+      }
     });
     setScenarioPicks(filled);
   };
