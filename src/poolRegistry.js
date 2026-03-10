@@ -16,7 +16,7 @@ export const SPORTS = [
         name: "2026 Playoffs",
         season: "2026",
         dbPath: "pools/nba-2026",
-        active: true,
+        active: false,
         component: "NBAPlayoffPool",
       },
     ],
@@ -55,7 +55,7 @@ export const SPORTS = [
     icon: "⛳",
     color: "#1A6B3A",
     pools: [
-      { id: "masters-2026", name: "The Masters 2026", season: "2026", dbPath: "pools/masters-2026", active: true, component: "MastersPool" },
+      { id: "masters-2026", name: "The Masters 2026", season: "2026", dbPath: "pools/masters-2026", active: false, component: "MastersPool" },
     ],
   },
   {
