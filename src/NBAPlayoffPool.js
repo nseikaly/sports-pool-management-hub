@@ -1923,6 +1923,8 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
   const [playInResults, setPlayInResults] = useState(null); // admin-set actual play-in results
   const [showPlayIn,    setShowPlayIn]    = useState(false); // play-in modal visibility
   const [submittedEntryFlash, setSubmittedEntryFlash] = useState(null); // null | 1 | 2 — which entry just had its first submission
+  const [showEmailPicks, setShowEmailPicks] = useState(false); // email picks modal visibility
+  const [emailPicksTo,   setEmailPicksTo]   = useState("");   // pre-populated email address
   const toastTimer = useRef(null);
 
   // ── Firebase listeners ──
@@ -2320,6 +2322,39 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
   };
   const handleScenarioClear = () => setScenarioPicks({});
 
+  // ── Email Picks ──
+  const handleEmailPicksOpen = () => {
+    const activeEmail = activeEntry === 1 ? myEmail.trim() : (myEmail2.trim() || myEmail.trim());
+    setEmailPicksTo(activeEmail);
+    setShowEmailPicks(true);
+  };
+
+  const buildPicksEmailBody = () => {
+    const activeName = activeEntry === 1 ? myName.trim() : (myName2.trim() || myName.trim()) || "My";
+    const lines = [];
+    lines.push(`My NBA Playoff Pool Picks — ${activeName}`);
+    lines.push("=".repeat(44));
+    lines.push("");
+    BRACKET_CONFIG.rounds.forEach(round => {
+      lines.push(round.name.toUpperCase());
+      round.series.forEach(series => {
+        const pick = activePicks[series.id];
+        const w = pick?.winner || "(not picked)";
+        const g = pick?.games  ? ` in ${pick.games}` : "";
+        if (round.id === "r1") {
+          const ps = applyPlayInPatch(series, activePlayInSeeds);
+          lines.push(`  ${ps.top} vs ${ps.bottom} → ${w}${g}`);
+        } else {
+          const labels = { s9:"East Semis A", s10:"East Semis B", s11:"West Semis A", s12:"West Semis B",
+                           s13:"East Finals", s14:"West Finals", s15:"NBA Champion" };
+          lines.push(`  ${labels[series.id] || series.id}: ${w}${g}`);
+        }
+      });
+      lines.push("");
+    });
+    return lines.join("\n");
+  };
+
   // ── Admin: paid status toggle ──
   const handlePaidToggle = async (participantKey, currentPaid) => {
     try {
@@ -2684,8 +2719,8 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
                 <button className="btn btn-gold" onClick={handleSubmit} disabled={!allPicked || !myName.trim() || !(activeEntry===1 ? myEmail.trim() : (myEmail2.trim()||myEmail.trim())) || saving || picksLocked}>
                   {saving ? "Saving…" : isSubmitted ? "Update Entry" : `Submit Entry ${activeEntry}`}
                 </button>
-                <button className="btn btn-ghost" onClick={() => window.print()} title="Print your picks bracket">
-                  🖨 Print Picks
+                <button className="btn btn-ghost" onClick={handleEmailPicksOpen} title="Email a copy of your picks">
+                  ✉ Email Picks
                 </button>
                 {picksLocked
                   ? <span className="xs" style={{color:"var(--red)"}}>🔒 Picks locked</span>
@@ -3391,6 +3426,61 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
       })()}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {/* ══ EMAIL PICKS MODAL ════════════════════════════════════════════════ */}
+      {showEmailPicks && (() => {
+        const activeName = activeEntry === 1 ? myName.trim() : (myName2.trim() || myName.trim()) || "My";
+        const subject    = `NBA Playoff Pool Picks — ${activeName}`;
+        const body       = buildPicksEmailBody();
+        const href       = `mailto:${encodeURIComponent(emailPicksTo)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        return (
+          <div className="ov-backdrop" onClick={e => { if (e.target === e.currentTarget) setShowEmailPicks(false); }}>
+            <div className="ov-modal" style={{maxWidth: 460}}>
+              <div className="ov-hdr">
+                <div className="ov-hdr-left">
+                  <div className="ov-title">✉ EMAIL MY PICKS</div>
+                  <div className="ov-sub">{activeName} · Entry {activeEntry} · {BRACKET_CONFIG.rounds.reduce((a,r)=>a+r.series.length,0)} series</div>
+                </div>
+                <button className="ov-close" onClick={() => setShowEmailPicks(false)}>✕</button>
+              </div>
+              <div className="ov-body" style={{padding:"22px 22px 24px", display:"flex", flexDirection:"column", gap:18}}>
+                <p style={{fontSize:"0.82rem", color:"var(--text2)", lineHeight:1.65, margin:0}}>
+                  Send a copy of your bracket picks to yourself for your records. Click{" "}
+                  <strong style={{color:"var(--gold)"}}>Open Email App</strong> and your default
+                  email client will open with all 15 of your picks pre-filled in the message body.
+                </p>
+                <div>
+                  <label className="fl" style={{marginBottom:6, fontSize:"0.72rem"}}>Send to</label>
+                  <input
+                    className="fi"
+                    type="email"
+                    value={emailPicksTo}
+                    onChange={e => setEmailPicksTo(e.target.value)}
+                    placeholder="your@email.com"
+                    autoFocus
+                  />
+                </div>
+                <div className="row gap8">
+                  <a
+                    className="btn btn-gold"
+                    href={href}
+                    onClick={() => setTimeout(() => setShowEmailPicks(false), 400)}
+                    style={{textDecoration:"none"}}
+                  >
+                    ✉ Open Email App
+                  </a>
+                  <button className="btn btn-ghost" onClick={() => setShowEmailPicks(false)}>
+                    Cancel
+                  </button>
+                </div>
+                <p style={{fontSize:"0.68rem", color:"var(--text3)", margin:0, lineHeight:1.55}}>
+                  💡 If your email app doesn't open, copy your address above and paste it manually into your preferred email client.
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ══ PLAY-IN MODAL ═══════════════════════════════════════════════════ */}
       {showPlayIn && (
