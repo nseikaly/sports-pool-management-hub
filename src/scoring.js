@@ -127,15 +127,20 @@ export function calcPoints(picks, results) {
 
 // Calculate max points still achievable.
 // Excludes future series where the picked team has already been eliminated.
-// Pass playInSeeds so that actual play-in teams (seed 9/10) are recognised as
-// eliminated and picks stored under old placeholder names are handled correctly.
+// Pass playInSeeds so that getEliminatedTeams correctly identifies actual
+// play-in team losers when computing the eliminated set.
+//
+// IMPORTANT: picks passed here must already be pre-substituted via
+// virtualSubstitutePicksForPlayIn before calling buildLeaderboard.
+// flatParticipants in NBAPlayoffPool.js does this. Applying buildPicksSubMap
+// again here would double-substitute — e.g. turning the correctly-resolved
+// "Miami Heat" (the actual E7 seed) into "Atlanta Hawks" (the E8 seed) just
+// because "Miami Heat" was the BRACKET_CONFIG placeholder for the E8 slot,
+// causing settled correct-winner checks to fail and losing points.
 export function maxPossible(picks, results, playInSeeds = null) {
   if (!picks) return 0;
 
   const eliminatedTeams = getEliminatedTeams(results, playInSeeds);
-  // Substitution map handles picks stored with BRACKET_CONFIG placeholder names
-  // (e.g. picks made before admin set play-in results).
-  const picksSubMap = buildPicksSubMap(playInSeeds);
 
   // Build a set of series IDs that are confirmed settled in Firebase results.
   // We use this to distinguish genuinely settled series from series that only
@@ -150,9 +155,6 @@ export function maxPossible(picks, results, playInSeeds = null) {
       const pick = picks[series.id];
       if (!pick?.winner) return; // No pick = no potential
 
-      // Resolve effective winner: apply substitution for old placeholder names
-      const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
-
       // Find if this series has an admin-confirmed result
       const resultSeries = settledIds.has(series.id)
         ? allSeries(results).find(s => s.id === series.id)
@@ -160,10 +162,10 @@ export function maxPossible(picks, results, playInSeeds = null) {
 
       if (!resultSeries?.winner) {
         // Series not settled yet — add full potential if pick team is still alive
-        if (!eliminatedTeams.has(effectiveWinner)) {
+        if (!eliminatedTeams.has(pick.winner)) {
           potential += round.winnerPoints + round.gamesPoints;
         }
-      } else if (effectiveWinner === resultSeries.winner) {
+      } else if (pick.winner === resultSeries.winner) {
         // Correct winner — add full winner + games potential.
         // MAX PTS represents the best-case score: if the winner pick is right,
         // the games pick could also be right (or for already-settled series,
