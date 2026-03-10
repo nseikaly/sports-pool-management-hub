@@ -137,6 +137,11 @@ export function maxPossible(picks, results, playInSeeds = null) {
   // (e.g. picks made before admin set play-in results).
   const picksSubMap = buildPicksSubMap(playInSeeds);
 
+  // Build a set of series IDs that are confirmed settled in Firebase results.
+  // We use this to distinguish genuinely settled series from series that only
+  // appear settled because the BRACKET_CONFIG skeleton has all IDs defined.
+  const settledIds = new Set(allSeries(results).filter(s => s.winner).map(s => s.id));
+
   let potential = 0;
 
   // Loop through ALL series in the bracket (not just ones with results)
@@ -148,20 +153,22 @@ export function maxPossible(picks, results, playInSeeds = null) {
       // Resolve effective winner: apply substitution for old placeholder names
       const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
 
-      // Find if this series has a result
-      const resultSeries = allSeries(results).find(s => s.id === series.id);
+      // Find if this series has an admin-confirmed result
+      const resultSeries = settledIds.has(series.id)
+        ? allSeries(results).find(s => s.id === series.id)
+        : null;
 
       if (!resultSeries?.winner) {
-        // Series not done yet — only count if team is still alive
+        // Series not settled yet — add full potential if pick team is still alive
         if (!eliminatedTeams.has(effectiveWinner)) {
           potential += round.winnerPoints + round.gamesPoints;
         }
       } else if (effectiveWinner === resultSeries.winner) {
-        // Correct winner — count earned points
-        potential += round.winnerPoints;
-        if (pick.games === resultSeries.games) {
-          potential += round.gamesPoints;
-        }
+        // Correct winner — add full winner + games potential.
+        // MAX PTS represents the best-case score: if the winner pick is right,
+        // the games pick could also be right (or for already-settled series,
+        // counts what was earned + what remained possible).
+        potential += round.winnerPoints + round.gamesPoints;
       }
       // Wrong pick = 0 potential
     });
