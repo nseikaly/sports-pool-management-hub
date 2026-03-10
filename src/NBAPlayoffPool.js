@@ -2284,37 +2284,36 @@ export default function NBAPlayoffPool({ dbPath, poolId, adminAuthed, onAdminLog
   const handleScenarioAutoFill = () => {
     // Use admin-only play-in seeds so elimination is based on confirmed results.
     const eliminated = getEliminatedTeams(results, adminPlayInSeeds);
-    // Build substitution map: old team name → actual admin-determined play-in winner.
-    // Covers (a) the BRACKET_CONFIG placeholder name (e.g. "Miami Heat" for the E8
-    // slot) and (b) the participant's own play-in pick if they chose a seed9/10 team
-    // (e.g. "Charlotte Hornets") — both must resolve to the real admin result team.
-    const picksSubMap = {};
-    const SEED_TO_PI_KEY = { E8: "piE3", E7: "piE1", W8: "piW3", W7: "piW1" };
-    const srcPlayInPicks = scenarioEntry === 1 ? playInPicks : playInPicks2;
-    Object.entries(PI_SLOT_MAP).forEach(([sid, seedKey]) => {
-      const actualTeam = adminPlayInSeeds?.[seedKey];
-      if (!actualTeam) return;
-      // (a) Map from the BRACKET_CONFIG default placeholder name
-      const r1Config = BRACKET_CONFIG.rounds[0].series.find(s => s.id === sid);
-      if (r1Config && actualTeam !== r1Config.bottom) {
-        picksSubMap[r1Config.bottom] = actualTeam;
-      }
-      // (b) Map from the participant's own play-in pick for this slot
-      const piKey = SEED_TO_PI_KEY[seedKey];
-      const participantPlayInPick = piKey && srcPlayInPicks?.[piKey];
-      if (participantPlayInPick && participantPlayInPick !== actualTeam) {
-        picksSubMap[participantPlayInPick] = actualTeam;
-      }
-    });
     // Use whichever entry is selected in the scenario toggle
     const srcPicks = scenarioEntry === 1 ? myPicks : myPicks2;
+
+    // virtualSubstitutePicksForPlayIn handles BOTH entry timing scenarios:
+    //
+    // (a) Entry submitted BEFORE admin play-in results:
+    //     Picks contain BRACKET_CONFIG placeholder names (e.g. "Miami Heat" stored
+    //     as the E8 slot bottom). virtualSubstitutePicksForPlayIn detects that
+    //     "Miami Heat" is neither the top seed nor the actual admin E8 winner
+    //     ("Atlanta Hawks"), so it correctly substitutes it — and chains that
+    //     substitution through all later-round picks.
+    //
+    // (b) Entry submitted AFTER admin play-in results:
+    //     Picks already contain actual team names (e.g. "Atlanta Hawks" for E8,
+    //     "Miami Heat" for E7). virtualSubstitutePicksForPlayIn sees that s1's
+    //     winner === the actual E8 bottom ("Atlanta Hawks") and s2's winner ===
+    //     the actual E7 bottom ("Miami Heat") — no substitution needed, so it
+    //     returns picks unchanged. This avoids the bug where the old custom
+    //     picksSubMap would incorrectly map "Miami Heat" → "Atlanta Hawks"
+    //     (because "Miami Heat" was the BRACKET_CONFIG placeholder for E8) even
+    //     though "Miami Heat" is the correct actual E7 team in later-round picks.
+    const substitutedPicks = adminPlayInSeeds
+      ? virtualSubstitutePicksForPlayIn(srcPicks, adminPlayInSeeds)
+      : srcPicks;
+
     const filled = {};
-    Object.entries(srcPicks).forEach(([sid, pick]) => {
+    Object.entries(substitutedPicks).forEach(([sid, pick]) => {
       if (!pick?.winner) return;
-      const effectiveWinner = picksSubMap[pick.winner] || pick.winner;
-      if (!eliminated.has(effectiveWinner)) {
-        // Store the substituted winner name so downstream series use the correct team
-        filled[sid] = effectiveWinner !== pick.winner ? { ...pick, winner: effectiveWinner } : pick;
+      if (!eliminated.has(pick.winner)) {
+        filled[sid] = pick;
       }
     });
     setScenarioPicks(filled);
