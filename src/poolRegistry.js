@@ -55,7 +55,7 @@ export const SPORTS = [
     icon: "⛳",
     color: "#1A6B3A",
     pools: [
-      { id: "masters-2026", name: "The Masters 2026", active: false, component: null },
+      { id: "masters-2026", name: "The Masters 2026", season: "2026", dbPath: "pools/masters-2026", active: true, component: "MastersPool" },
     ],
   },
   {

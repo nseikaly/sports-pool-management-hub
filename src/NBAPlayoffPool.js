@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, Fragment } from "react";
 import { ref, onValue, set, update } from "firebase/database";
 import { db, auth } from "./firebase";
-import { BRACKET_CONFIG, GAME_OPTIONS, MAX_POINTS, PLAY_IN_CONFIG, PLAY_IN_SLOTS } from "./bracketConfig";
-import { buildLeaderboard, calcPoints, maxPossible, getEliminatedTeams } from "./scoring";
-import { TeamLogo } from "./teamLogos";
+import { BRACKET_CONFIG, GAME_OPTIONS, MAX_POINTS, PLAY_IN_CONFIG, PLAY_IN_SLOTS } from "./nbaBracketConfig";
+import { buildLeaderboard, calcPoints, maxPossible, getEliminatedTeams } from "./nbaScoring";
+import { TeamLogo } from "./nbaTeamLogos";
 
 // ─── Seed lookup (team name → playoff seed) built from R1 config ─────────────
 const TEAM_SEEDS = {};

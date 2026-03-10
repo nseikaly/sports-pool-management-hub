@@ -4,6 +4,7 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebas
 import { db, auth } from "./firebase";
 import { SPORTS, POOL_MAP } from "./poolRegistry";
 import NBAPlayoffPool from "./NBAPlayoffPool";
+import MastersPool    from "./MastersPool";
 
 // ─── Shell CSS ────────────────────────────────────────────────────────────────
 
@@ -974,6 +975,18 @@ export default function App() {
     if (pool.component === "NBAPlayoffPool" && (isActive || adminAuthed)) {
       return (
         <NBAPlayoffPool
+          dbPath={pool.dbPath}
+          poolId={pool.id}
+          adminAuthed={adminAuthed}
+          onAdminLogin={handleAdminLogin}
+        />
+      );
+    }
+
+    // Masters 2026 pool
+    if (pool.component === "MastersPool" && (isActive || adminAuthed)) {
+      return (
+        <MastersPool
           dbPath={pool.dbPath}
           poolId={pool.id}
           adminAuthed={adminAuthed}
