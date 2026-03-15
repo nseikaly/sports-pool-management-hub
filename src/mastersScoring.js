@@ -1,83 +1,104 @@
 // ─── Masters 2026 Scoring Logic ───────────────────────────────────────────────
-// Handles scoring, leaderboard building, and standings for the golf pool.
-// Each participant picks one golfer per tier; the pool is scored by finish position
-// (or strokes, depending on mastersConfig.scoring.scoringType).
+// Points-based: each participant picks 6 golfers under $500 salary cap.
+// Total score = sum of each golfer's points (hole scoring + finish bonus + bonuses).
+// Higher total points wins.
 
-import { MASTERS_CONFIG } from "./mastersConfig";
+import { getFinishBonus } from "./mastersConfig";
+
+// ── Results shape ─────────────────────────────────────────────────────────────
+// results: {
+//   [playerName]: {
+//     status:      "active" | "CUT" | "WD" | "F"
+//     position:    number | null          // final finish position
+//     holePoints:  number                 // sum of per-hole scoring
+//     bonusPoints: number                 // streak + special bonuses
+//     finishBonus: number                 // auto-calc from position
+//     totalPoints: number                 // holePoints + finishBonus + bonusPoints
+//   }
+// }
+//
+// Participants shape:
+// { [pushId]: { name, email, picks: ["Player1", ...], totalSalary, timestamp } }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
-// participants: { [key]: { name, email, picks: { t1: "Player Name", t2: ..., ... } } }
-// results:      { [playerName]: { position: 1, score: -18, thru: 72, status: "F" } }
-//               position = finishing place (1 = winner). null if not yet posted.
 export function buildMastersLeaderboard(participants, results) {
-  return Object.entries(participants || {})
-    .map(([id, p]) => {
-      const scored = scorePicks(p.picks || {}, results);
-      return {
-        id,
-        ...p,
-        ...scored,
-      };
-    })
-    .sort((a, b) => {
-      // Lower total position = better (like golf: lower score wins)
-      if (a.totalPosition !== b.totalPosition) return a.totalPosition - b.totalPosition;
-      // Tiebreaker: best tier 1 finish
-      return (a.t1Position ?? 999) - (b.t1Position ?? 999);
-    });
+  const entries = Object.entries(participants || {}).map(([id, p]) => {
+    const scored = scoreEntry(p.picks || [], results);
+    return { id, ...p, ...scored };
+  });
+
+  // Sort: highest totalPoints first; tiebreak by pick[0] points then pick[1], etc.
+  entries.sort((a, b) => {
+    if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+    for (let i = 0; i < 6; i++) {
+      const ap = a.pickDetails?.[i]?.totalPoints ?? -999;
+      const bp = b.pickDetails?.[i]?.totalPoints ?? -999;
+      if (bp !== ap) return bp - ap;
+    }
+    return 0;
+  });
+
+  // Assign ranks (handle ties)
+  let rank = 1;
+  entries.forEach((e, i) => {
+    if (i > 0 && e.totalPoints === entries[i - 1].totalPoints) {
+      e.rank = entries[i - 1].rank;
+    } else {
+      e.rank = rank;
+    }
+    rank++;
+  });
+
+  return entries;
 }
 
-// ── Score a single participant's picks against current results ─────────────
-// Returns { totalPosition, t1Position, tierScores: { t1: {...}, t2: {...}, ... }, complete }
-export function scorePicks(picks, results) {
-  let totalPosition = 0;
-  let complete      = true;
-  const tierScores  = {};
+// ── Score one entry ───────────────────────────────────────────────────────────
+// picks: array of player name strings (up to 6)
+// returns: { totalPoints, pickDetails, complete }
+export function scoreEntry(picks, results) {
+  let totalPoints = 0;
+  let complete    = true;
 
-  MASTERS_CONFIG.tiers.forEach(tier => {
-    const player   = picks[tier.id];
-    const result   = player ? (results?.[player] ?? null) : null;
-    const position = result?.position ?? null;
+  const pickDetails = (picks || []).map(player => {
+    const r   = results?.[player] ?? null;
+    const pts = r?.totalPoints ?? 0;
 
-    tierScores[tier.id] = {
+    // Not complete if any pick is still active or has no result
+    if (!r || r.status === "active" || r.status == null) complete = false;
+
+    return {
       player,
-      position,
-      score:  result?.score  ?? null,
-      thru:   result?.thru   ?? null,
-      status: result?.status ?? null,
+      status:      r?.status      ?? null,
+      position:    r?.position    ?? null,
+      holePoints:  r?.holePoints  ?? null,
+      finishBonus: r?.finishBonus ?? null,
+      bonusPoints: r?.bonusPoints ?? null,
+      totalPoints: pts,
     };
-
-    if (position == null) {
-      complete = false;
-    } else {
-      totalPosition += position;
-    }
   });
 
-  const t1Position = tierScores["t1"]?.position ?? null;
+  totalPoints = pickDetails.reduce((sum, d) => sum + (d.totalPoints ?? 0), 0);
 
-  return { totalPosition: complete ? totalPosition : null, t1Position, tierScores, complete };
+  return { totalPoints, pickDetails, complete };
 }
 
-// ── Max possible score (best still-achievable position total) ─────────────────
-// For each tier pick: if the player is still active, assume they could win (pos=1).
-// If they've finished, use their actual position.
+// ── Calculate a golfer's total points ────────────────────────────────────────
+// Call this when the admin enters/updates a result to keep totalPoints in sync.
+export function calcGolferTotal(holePoints, position, bonusPoints) {
+  return (Number(holePoints) || 0)
+       + getFinishBonus(position)
+       + (Number(bonusPoints) || 0);
+}
+
+// ── Best-case score for an entry ─────────────────────────────────────────────
+// For players still active, assume they can earn 30 pts (win the tournament + big hole day).
+// Used to show "max possible" on the leaderboard during the tournament.
 export function mastersMaxPossible(picks, results) {
-  let best = 0;
-  MASTERS_CONFIG.tiers.forEach(tier => {
-    const player = picks?.[tier.id];
-    if (!player) return;
-    const result = results?.[player] ?? null;
-    if (result?.status === "CUT" || result?.status === "WD") {
-      // Missed cut or withdrew — use their position (last place ish) or a penalty
-      best += result.position ?? 99;
-    } else if (result?.position != null) {
-      // Finished — locked in position
-      best += result.position;
-    } else {
-      // Still playing — best case is winning (1st)
-      best += 1;
-    }
-  });
-  return best;
+  return (picks || []).reduce((sum, player) => {
+    const r = results?.[player] ?? null;
+    if (r?.status === "CUT" || r?.status === "WD") return sum + (r.totalPoints ?? 0);
+    if (r?.status === "F") return sum + (r.totalPoints ?? 0);
+    // Still active or no result yet: optimistic ceiling
+    return sum + (r?.totalPoints ?? 60); // rough ceiling
+  }, 0);
 }
